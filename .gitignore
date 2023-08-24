@@ -1,0 +1,8 @@
+runs/
+
+.venv
+.env
+git-*
+*.png
+
+config.toml
