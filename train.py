@@ -1,5 +1,5 @@
-import os
-import sys
+# import os
+# import sys
 import glob
 import json
 
@@ -15,7 +15,8 @@ from peft import LoraConfig, TaskType, get_peft_model
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
-from dataclasses import dataclass, field
+
+# from dataclasses import dataclass, field
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -24,12 +25,16 @@ from transformers import (
     AutoTokenizer,
     Trainer,
     TrainingArguments,
-    HfArgumentParser,
+    # HfArgumentParser,
     set_seed,
 )
 from prodigyopt import Prodigy
 
 captions = []
+
+
+def transform_nothing(a):
+    return a
 
 
 class ImageCaptioningDataset(Dataset):
@@ -267,7 +272,7 @@ def main(args):
     model_name = checkpoint.split("/")[1]
 
     training_args = TrainingArguments(
-        output_dir=f"outputs/{model_name}-povblowjobpose",
+        output_dir=f"outputs/{model_name}-pov-pose",
         overwrite_output_dir=True,
         # learning_rate=5e-5,
         # learning_rate=3e-3,
