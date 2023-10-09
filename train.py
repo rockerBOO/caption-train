@@ -78,6 +78,26 @@ class ImageCaptioningDataset(Dataset):
         return encoding
 
 
+def collate_fn(processor):
+    def x(batch):
+        # pad the input_ids and attention_mask
+        processed_batch = {}
+        for key in batch[0].keys():
+            if key != "text":
+                processed_batch[key] = torch.stack([example[key] for example in batch])
+            else:
+                text_inputs = processor.tokenizer(
+                    [example["text"] for example in batch],
+                    padding=True,
+                    return_tensors="pt",
+                )
+                processed_batch["input_ids"] = text_inputs["input_ids"]
+                processed_batch["attention_mask"] = text_inputs["attention_mask"]
+        return processed_batch
+
+    return x
+
+
 def load_captions(images: list[str]) -> list[str]:
     # Load up captions
     # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -154,7 +174,9 @@ def main(args):
         images = [x for x in example_batch["image"]]
         captions = [x for x in example_batch["text"]]
         inputs = processor(images=images, text=captions, padding="max_length")
-        inputs.update({"labels": inputs["input_ids"]})
+        inputs.update(
+            {"labels": inputs["input_ids"], "attention_mask": inputs["attention_mask"]}
+        )
         return inputs
 
     dataset["train"].set_transform(transforms)
@@ -228,12 +250,12 @@ def main(args):
             "v_proj",
             "q_proj",
             "out_proj",
-            "fc1",
-            "fc2",
+            # "fc1",
+            # "fc2",
             "query",
             "key",
             "value",
-            "dense",
+            # "dense",
         ],
         inference_mode=False,
         r=args.network_rank,
@@ -263,9 +285,12 @@ def main(args):
     bs = args.batch_size
     scheduler = torch.optim.lr_scheduler.CyclicLR(
         optimizer,
+        args.base_lr,
+        args.max_lr,
         #                              BS  GA  range
         step_size_up=int(total_steps / bs / gas / 2),
         step_size_down=int(total_steps / bs / gas / 2),
+        cycle_momentum=False,
         **args.scheduler_args,
     )
 
@@ -317,6 +342,7 @@ def train_model(args, model, optimizer, scheduler, train_dataloader, progress_ba
     model.train()
 
     step = 0
+    finished_steps = 0
 
     for epoch in range(args.epochs):
         total_loss = 0
@@ -324,6 +350,7 @@ def train_model(args, model, optimizer, scheduler, train_dataloader, progress_ba
         for idx, batch in enumerate(train_dataloader):
             input_ids = batch.pop("input_ids")
             pixel_values = batch.pop("pixel_values")
+            attention_mask = batch.pop("attention_mask")
             labels = batch.pop("labels")
 
             # labels = input_ids
@@ -332,23 +359,24 @@ def train_model(args, model, optimizer, scheduler, train_dataloader, progress_ba
                 **batch,
                 "input_ids": input_ids,
                 "pixel_values": pixel_values,
+                "attention_mask": attention_mask,
                 "labels": labels,
             }
 
             outputs = model(**kwargs)
 
-            # if args.sample_steps and finished_steps % args.sample_steps == 0:
-            #     with torch.no_grad():
-            #         generated_ids = model.generate(
-            #             pixel_values=pixel_values, max_length=75
-            #         )
-            #
-            #         generated_captions = processor.batch_decode(
-            #             generated_ids, skip_special_tokens=True
-            #         )
-            #         print(generated_captions)
+            if args.sample_steps and finished_steps % args.sample_steps == 0:
+                with torch.no_grad():
+                    generated_ids = model.generate(
+                        pixel_values=pixel_values, max_length=75
+                    )
 
-            # # load image
+                    generated_captions = processor.batch_decode(
+                        generated_ids, skip_special_tokens=True
+                    )
+                    print(generated_captions)
+
+            # load image
             # example =
             # image = example["image"]
             # caption = sample_caption(image, processor, model, device=device)
@@ -394,9 +422,9 @@ def train_model(args, model, optimizer, scheduler, train_dataloader, progress_ba
             #     total += 1
             # accuracy = correct / total * 100
 
-            writer.add_scalar("loss", loss, step)
-            for i, lr in enumerate(scheduler.get_last_lr()):
-                writer.add_scalar(f"lr-{i}", lr, step)
+            # writer.add_scalar("loss", loss, step)
+            # for i, lr in enumerate(scheduler.get_last_lr()):
+            #     writer.add_scalar(f"lr-{i}", lr, step)
 
             progress_bar.update(1)
             progress_bar.set_postfix(**{"loss": float(loss)})
@@ -422,7 +450,7 @@ def train_model(args, model, optimizer, scheduler, train_dataloader, progress_ba
         train_epoch_loss = total_loss / len(train_dataloader)
         train_ppl = torch.exp(train_epoch_loss)
         train_epoch_loss = train_epoch_loss.detach().float()
-        writer.add_scalar(f"{train_ppl=} {train_epoch_loss=}", step)
+        # writer.add_scalar(f"{train_ppl=} {train_epoch_loss=}", step)
 
         progress_bar.set_postfix(
             **{
@@ -442,13 +470,14 @@ def parse_args():
         help="Model name from hugging face or path to model",
     )
 
-    # parser.add_argument(
-    #     "--train_dir", required=True, help="Directory with training data"
-    # )
+    parser.add_argument(
+        "--train_dir", required=True, help="Directory with training data"
+    )
 
-    parser.add_argument("--debug", action="store_true", help="Debug the captions")
+    # parser.add_argument("--debug", action="store_true",
+    # help="Debug the captions")
 
-    parser.add_argument("--epochs", type=int, default=50, help="Epochs to run")
+    parser.add_argument("--epochs", type=int, default=10, help="Epochs to run")
 
     parser.add_argument(
         "--seed", type=int, default=42, help="Seed to run the training with"
@@ -526,6 +555,18 @@ def parse_args():
     )
 
     parser.add_argument("--block_size", help="Block size, defaults to 2048")
+
+    parser.add_argument(
+        "--optimizer_args",
+        default={},
+        help="Arguments to pass to the optimizer (probably not working right now)",
+    )
+
+    parser.add_argument(
+        "--scheduler_args",
+        default={},
+        help="Arguments to pass to the scheduler (probably not working right now)",
+    )
 
     args = parser.parse_args()
 
