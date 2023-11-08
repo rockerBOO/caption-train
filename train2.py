@@ -1,8 +1,10 @@
 import argparse
+import asyncio
+import json
 import random
+import sys
 from pathlib import Path
 from time import gmtime, strftime
-import sys
 
 import torch
 import torchvision.transforms as T
@@ -11,6 +13,7 @@ from datasets import load_dataset
 
 # from matplotlib import pyplot as plt
 from peft import IA3Config, LoraConfig, get_peft_model
+from PIL import Image
 from prodigyopt import Prodigy
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import (
@@ -23,6 +26,8 @@ from transformers import (
     AutoProcessor,
     BlipForConditionalGeneration,
 )
+from websockets import serve
+from websockets.sync.client import connect
 
 from caption_train.captions import setup_metadata, shuffle_caption
 
@@ -243,6 +248,28 @@ def collate_fn(processor):
     return process_collate_fn
 
 
+def send_and_wait_for_response(websocket, message):
+    req = dict(
+        req_from="trainer",
+        type="caption_new",
+        payload=dict(new_caption="hello new caption"),
+    )
+    websocket.send(req)
+    recv_message = websocket.recv()
+    print(f"Received: {recv_message}")
+    return recv_message
+
+
+def send_captions_images(images, captions):
+    req = dict(
+        req_from="trainer",
+        type="captions",
+        payload=dict(images=images, captions=captions),
+    )
+
+    broadcast(json.dumps(req))
+
+
 def setup_dataset(processor, args):
     setup_metadata(Path(args.dataset_dir), captions=[])
 
@@ -288,7 +315,7 @@ def setup_dataset(processor, args):
         val_dataset,
         shuffle=False,
         num_workers=4,
-        batch_size=args.batch_size,
+        batch_size=1,
         collate_fn=collate_fn(processor),
     )
 
@@ -331,18 +358,19 @@ def wrap_in_lora(model, args):
     print("Using LoRA")
     ## LORA
 
-    lora_rank = 8
-    lora_alpha = 32
+    lora_rank = 32
+    lora_alpha = 16
     lora_dropout = 0.05
     # qkv, projection, fc1, fc2, query, key, value, dense, decoder
-    target_modules = [
-        "query",
-        "key",
-        "qkv",
-        "crossattention.output.dense",
-        "attention.output.dense",
-        "self_attn.projection",
-    ]
+    target_modules = (
+        ".*encoder.*(self_attn|self|crossattention|attention).*(qkv|key|query|value|projection).*"
+        # "query",
+        # "key",
+        # "qkv",
+        # "crossattention.output.dense",
+        # "attention.output.dense",
+        # "self_attn.projection",
+    )
 
     peft_config = LoraConfig(
         r=lora_rank,
@@ -370,6 +398,7 @@ def get_scheduler(optimizer, train_dataset_length, args):
     # )
 
     # scheduler = torch.ptim.lr_scheduler.ConstantLR(optimizer)
+
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(
     #     optimizer,
     #     max_lr=1.2,
@@ -379,25 +408,25 @@ def get_scheduler(optimizer, train_dataset_length, args):
 
     # CosineAnnealingLR
 
-    n_epochs = 1
+    n_epochs = args.epochs
     steps = n_epochs * (
         train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)
     )
-    scheduler_args = {"steps": steps}
+    scheduler_args = {"T_max": steps}
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, steps)
 
-    # CosineAnnealingWarmRestarts
-
-    n_epochs = 1
-    steps = int(
-        n_epochs
-        * (train_dataset_length / (args.batch_size * args.gradient_accumulation_steps))
-    )
-    t_mult = 2
-    scheduler_args = {"steps": steps, "t_mult": t_mult}
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, steps, T_mult=t_mult
-    )
+    # # CosineAnnealingWarmRestarts
+    #
+    # n_epochs = 1
+    # steps = int(
+    #     n_epochs
+    #     * (train_dataset_length / (args.batch_size * args.gradient_accumulation_steps))
+    # )
+    # t_mult = 2
+    # scheduler_args = {"steps": steps, "T_mult": t_mult}
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    #     optimizer, **scheduler_args
+    # )
 
     return scheduler, scheduler_args
 
@@ -408,13 +437,13 @@ def get_optimizer(model, args):
     # PRODIGY
 
     lr = 1.0
-    weight_decay = 0.1
+    weight_decay = 0.01
     optimizer_args = {
         "lr": lr,
         "weight_decay": weight_decay,
         # "safeguard_warmup": True,
         "use_bias_correction": True,
-        "d_coef": 1.0,
+        "d_coef": 1.5,
     }
     # optimizer_args = {"lr": lr, }
     print("Using Prodigy optimizer")
@@ -459,6 +488,102 @@ def get_blip_model(args):
     return model
 
 
+async def websocket_process(message, websocket):
+    print(message)
+    await websocket.send("hi")
+
+
+# Websocket clients connected
+CLIENTS = set()
+
+
+def broadcast(message):
+    for queue in CLIENTS:
+        queue.put_nowait(message)
+
+
+async def broadcast_and_wait(message) -> list[str]:
+    for queue in CLIENTS:
+        queue.put_nowait(message)
+
+    responses = []
+    for queue in CLIENTS:
+        responses.append(await queue.get())
+
+    return responses
+
+
+async def relay(queue, websocket):
+    while True:
+        # Implement custom logic based on queue.qsize() and
+        # websocket.transport.get_write_buffer_size() here.
+        message = await queue.get()
+        await websocket.send(message)
+
+
+async def websocket_handler(websocket):
+    queue = asyncio.Queue()
+    # relay_task = asyncio.create_task(relay(queue, websocket))
+    CLIENTS.add(queue)
+    try:
+        await websocket.wait_closed()
+    finally:
+        CLIENTS.remove(queue)
+        # relay_task.cancel()
+
+
+async def start_websocket_server():
+    async with serve(websocket_handler, "localhost", 8765):
+        await asyncio.Future()  # run forever
+
+
+def test_dataloader(t_dataloader):
+    # start_websocket_server()
+
+    for i, batch in enumerate(t_dataloader):
+        input_ids = batch.pop("input_ids")
+        pixel_values = batch.pop("pixel_values")
+        attention_mask = batch.pop("attention_mask")
+
+        captions = processor.batch_decode(input_ids, skip_special_tokens=True)
+        images = [Image.fromarray(pixels) for pixels in pixel_values]
+
+        send_captions_images(images, captions)
+
+
+def process_batch(batch, model, processor, global_step, accelerator, args):
+    global_step += 1
+
+    input_ids = batch.pop("input_ids").to(accelerator.device)
+    pixel_values = batch.pop("pixel_values").to(accelerator.device)
+    attention_mask = batch.pop("attention_mask").to(accelerator.device)
+
+    with accelerator.autocast():
+        outputs = model(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            attention_mask=attention_mask,
+            labels=input_ids,
+        )
+
+        if args.interactive is True:
+            captions = processor.batch_decode(
+                input_ids, skip_special_tokens=True
+            )
+            images = [Image.fromarray(pixels) for pixels in pixel_values]
+
+            send_captions_images(images, captions)
+
+            send_and_wait_for_response()
+
+            # update run with response data
+
+            print("interactive")
+    loss = outputs.loss.mean()
+
+    return loss
+
+
 def train(model, processor, train_dataloader, val_dataloader, args):
     # epochs = 5
     # save_every_n_epochs = 5
@@ -476,7 +601,6 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
     # PEFT MODULE
     peft_module = "LoRA"
-    print(peft_module == "LoRA", peft_module)
 
     if peft_module == "LoRA":
         model, peft_config = wrap_in_lora(model, args)
@@ -484,6 +608,10 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         model, peft_config = wrap_in_ia3(model, args)
     else:
         raise ValueError(f"Invalid PEFT module: {peft_module}")
+
+    if args.interactive:
+        websocket = connect("ws://localhost:8765")
+        websocket.send(dict(req_from="trainer", type="connect"))
 
     # OPTIMIZER
     optimizer, optimizer_args = get_optimizer(model, args)
@@ -510,7 +638,6 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
         for key in unclean_dict.keys():
             v = unclean_dict.get(key)
-            print(type(v))
 
             if type(v) not in [bool, str, int, float, dict]:
                 continue
@@ -566,21 +693,22 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         # BATCH
         for step, batch in enumerate(t_dataloader):
             with accelerator.accumulate(model):
-                global_step += 1
-
-                input_ids = batch.pop("input_ids")
-                pixel_values = batch.pop("pixel_values")
-                attention_mask = batch.pop("attention_mask")
-
-                with accelerator.autocast():
-                    outputs = model(
-                        input_ids=input_ids,
-                        pixel_values=pixel_values,
-                        attention_mask=attention_mask,
-                        labels=input_ids,
-                    )
-
-                loss = outputs.loss.mean()
+                loss = process_batch(batch, model, global_step, accelerator)
+                # global_step += 1
+                #
+                # input_ids = batch.pop("input_ids")
+                # pixel_values = batch.pop("pixel_values")
+                # attention_mask = batch.pop("attention_mask")
+                #
+                # with accelerator.autocast():
+                #     outputs = model(
+                #         input_ids=input_ids,
+                #         pixel_values=pixel_values,
+                #         attention_mask=attention_mask,
+                #         labels=input_ids,
+                #     )
+                #
+                # loss = outputs.loss.mean()
 
                 accelerator.backward(loss)
 
@@ -627,23 +755,26 @@ def train(model, processor, train_dataloader, val_dataloader, args):
                     }
                 )
 
+                # process wait for?
+
         # VALIDATION
         v_dataloader = val_dataloader
         with torch.no_grad():
             for val_step, batch in enumerate(v_dataloader):
-                input_ids = batch.pop("input_ids").to(accelerator.device)
-                pixel_values = batch.pop("pixel_values").to(accelerator.device)
-                attention_mask = batch.pop("attention_mask").to(accelerator.device)
-
-                with accelerator.autocast():
-                    outputs = model(
-                        input_ids=input_ids,
-                        pixel_values=pixel_values,
-                        attention_mask=attention_mask,
-                        labels=input_ids,
-                    )
-
-                loss = outputs.loss.mean()
+                loss = process_batch(batch, model, global_step, accelerator)
+                # input_ids = batch.pop("input_ids").to(accelerator.device)
+                # pixel_values = batch.pop("pixel_values").to(accelerator.device)
+                # attention_mask = batch.pop("attention_mask").to(accelerator.device)
+                #
+                # with accelerator.autocast():
+                #     outputs = model(
+                #         input_ids=input_ids,
+                #         pixel_values=pixel_values,
+                #         attention_mask=attention_mask,
+                #         labels=input_ids,
+                #     )
+                #
+                # loss = outputs.loss.mean()
 
                 current_loss = loss.detach().item()
 
@@ -663,7 +794,9 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         accelerator.log(loggable, step=global_step)
 
         # load image
-        for val in val_dataloader:
+        for i, val in enumerate(val_dataloader):
+            if i >= 20:
+                break
             sample(val, model, processor, accelerator)
 
         # Save every n epochs
@@ -694,6 +827,10 @@ def main(args):
     torch.manual_seed(seed)
     random.seed(seed)
 
+    # setup_metadata(Path(args.dataset_dir), captions=[])
+    #
+    # sys.exit(2)
+
     # args.dataset_dir = "/mnt/900/input/nsfw/captions"
     # args.training_name = "pov"
 
@@ -714,6 +851,11 @@ def main(args):
     train_dataset, train_dataloader, val_dataset, val_dataloader = setup_dataset(
         processor, args
     )
+
+    print(f"Training: {len(train_dataloader)}")
+    print(f"Validation: {len(val_dataloader)}")
+
+    # test_dataloader(train_dataloader)
 
     train(model, processor, train_dataloader, val_dataloader, args)
 

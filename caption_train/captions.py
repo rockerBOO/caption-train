@@ -24,7 +24,7 @@ def load_captions(dir: Path, captions=[], true_dir="") -> list[str]:
                     "file_name": file_name,
                     "text": " ".join(f.readlines()).strip(),
                 }
-                print(caption)
+                # print(caption)
 
                 captions.append(caption)
         else:

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import os
 from urllib.parse import unquote
+from io import BytesIO
 
 
 class SubHTTPServer(HTTPServer):
@@ -54,6 +55,17 @@ class ServerHandler(SimpleHTTPRequestHandler):
             self.response_with_json()
         else:
             SimpleHTTPRequestHandler.do_GET(self)
+
+    def respond_with_pil_image(self, pil_img):
+        self.send_response(200)
+        self.send_header("content-type", "image/jpeg")
+        self.end_headers()
+
+        img_io = BytesIO()
+        pil_img.save(img_io, "JPEG", quality=95)
+        img_io.seek(0)
+
+        self.wfile.write(img_io)
 
     def captions_response(self):
         testing = []
