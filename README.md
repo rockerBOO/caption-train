@@ -29,7 +29,9 @@ usage: train2.py [-h] --output_dir OUTPUT_DIR --dataset_dir DATASET_DIR [--lr LR
                  [--training_name TRAINING_NAME] --epochs EPOCHS [--save_every_n_epochs SAVE_EVERY_N_EPOCHS] [--batch_size BATCH_SIZE]
                  [--gradient_accumulation_steps GRADIENT_ACCUMULATION_STEPS] [--gradient_checkpointing] [--max_grad_norm MAX_GRAD_NORM]
                  [--shuffle_captions] [--frozen_parts FROZEN_PARTS] [--caption_dropout CAPTION_DROPOUT] [--peft_module {LoRA,IA3}]
-                 [--seed SEED] [--interactive INTERACTIVE] [--model_config MODEL_CONFIG]
+                 [--seed SEED] [--interactive INTERACTIVE] [--model_config MODEL_CONFIG] [--optimizer {Prodigy,AdamW}]
+                 [--lr_scheduler {CosineAnnealingLR,CosineAnnealingWarmRestarts,CyclicLR,OneCycleLR}] [--scheduler_args SCHEDULER_ARGS]
+                 [--config_file CONFIG_FILE]
 
 options:
   -h, --help            show this help message and exit
@@ -65,6 +67,14 @@ options:
                         Interactive hook for modifying the dataset while running
   --model_config MODEL_CONFIG
                         Model configuration parameters (dropout, device_map, ...)
+  --optimizer {Prodigy,AdamW}
+                        Optimizer to use
+  --lr_scheduler {CosineAnnealingLR,CosineAnnealingWarmRestarts,CyclicLR,OneCycleLR}
+                        Learning rate scheduler
+  --scheduler_args SCHEDULER_ARGS
+                        Arguments for the learning rate scheduler
+  --config_file CONFIG_FILE
+                        Config file with all the arguments
 ```
 
 Example `config.toml`. Very raw usage of parameters and can be any value also in help.

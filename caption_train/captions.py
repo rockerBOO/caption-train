@@ -4,6 +4,7 @@ import json
 
 
 def load_captions(dir: Path, captions=[], true_dir="") -> list[str]:
+    found_captions = 0
     for file in dir.iterdir():
         if file.is_dir():
             print(f"found dir: {file}")
@@ -24,11 +25,15 @@ def load_captions(dir: Path, captions=[], true_dir="") -> list[str]:
                     "file_name": file_name,
                     "text": " ".join(f.readlines()).strip(),
                 }
+
+                found_captions += 1
                 # print(caption)
 
                 captions.append(caption)
         else:
             print(f"no captions for {txt_file}")
+
+    print(f"found_captions: {found_captions}")
     return captions
 
 

@@ -1,19 +1,17 @@
 import argparse
-import asyncio
 import json
 import random
-import sys
 from pathlib import Path
 from time import gmtime, strftime
 
+import tomllib
 import torch
+from torch import nn
 import torchvision.transforms as T
 from accelerate import Accelerator
 from datasets import load_dataset
-
-# from matplotlib import pyplot as plt
+from evaluate import load
 from peft import IA3Config, LoraConfig, get_peft_model
-from PIL import Image
 from prodigyopt import Prodigy
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import (
@@ -23,13 +21,17 @@ from torchvision.transforms import (
 from tqdm import tqdm
 from transformers import (
     AutoConfig,
+    AutoModel,
+    AutoModelForCausalLM,
     AutoProcessor,
+    GitModel,
+    GitForCausalLM,
     BlipForConditionalGeneration,
 )
-from websockets import serve
-from websockets.sync.client import connect
 
 from caption_train.captions import setup_metadata, shuffle_caption
+
+# from websockets.sync.client import connect
 
 
 @torch.no_grad()
@@ -58,123 +60,6 @@ def sample(example, model, processor, accelerator):
 
     for generated_caption in generated_captions:
         print(f"Gen: {generated_caption}")
-
-
-# def plot():
-#     fig = plt.figure(figsize=(100, 100))
-#
-#     images = [ds["test"][x] for x in range(10)]
-#
-#     # Calculate the number of rows and columns based on the number of items in the data array
-#     num_items = len(images)
-#     num_rows = int(num_items**0.5)  # Calculate rows (square root for a balanced grid)
-#     num_columns = (
-#         num_items + num_rows - 1
-#     ) // num_rows  # Calculate columns to fit images
-#
-#     # Create and configure the subplot grid
-#     fig, axes = plt.subplots(
-#         num_rows, num_columns, figsize=(320, 180)
-#     )  # Adjust figsize as needed
-#     fig.subplots_adjust(hspace=0.5)  # Adjust vertical spacing
-#
-#     with torch.no_grad():
-#         # prepare image for the model
-#         for i, example in enumerate(tqdm(images)):
-#             image = example["image"]
-#             inputs = processor(images=image, return_tensors="pt").to(device)
-#             pixel_values = inputs.pixel_values
-#
-#             generated_ids = model.generate(pixel_values=pixel_values, max_length=50)
-#             generated_caption = processor.batch_decode(
-#                 generated_ids, skip_special_tokens=True
-#             )[0]
-#
-#             del inputs
-#
-#             row = i // num_columns
-#             col = i % num_columns
-#             ax = axes[row, col]
-#             # fig.add_subplot(2, 3, i + 1)
-#             ax.imshow(image)
-#             ax.axis("off")
-#             ax.set_title(f"Generated caption: {generated_caption}")
-#
-#     plt.savefig("x.png")
-#
-
-
-# def load_captions(dir: Path, captions=[]) -> list[str]:
-#     for file in dir.iterdir():
-#         if file.is_dir():
-#             print(f"found dir: {file}")
-#             captions = load_captions(file, captions)
-#             continue
-#
-#         if file.suffix not in [".png", ".jpg", ".jpeg", ".webp"]:
-#             continue
-#
-#         # need to check for images and then get the associated .txt file
-#
-#         txt_file = file.with_name(f"{file.stem}.txt")
-#
-#         if txt_file.exists():
-#             with open(txt_file, "r") as f:
-#                 file_name = str(file.relative_to(dataset_dir))
-#                 caption = {
-#                     "file_name": file_name,
-#                     "text": " ".join(f.readlines()).strip(),
-#                 }
-#
-#             captions.append(caption)
-#
-#         else:
-#             print(f"no captions for {txt_file}")
-#     return captions
-#
-
-# Convert .txt captions to metadata.jsonl file for dataset
-# def setup_metadata(output, captions):
-#     captions = load_captions(output, captions)
-#
-#     if len(captions) == 0:
-#         raise ValueError("yo no captions")
-#
-#     # print(json.dumps(captions, indent=4))
-#
-#     print("Saving captions")
-#
-#     with open(Path(output) / "metadata.jsonl", "w") as f:
-#         # jsonl has json for each item
-#         for item in captions:
-#             f.write(json.dumps(item) + "\n")
-#
-
-# def shuffle_caption(text, shuffle_on=", ", frozen_parts=1, dropout=0.0):
-#     parts = [part.strip() for part in text.split(shuffle_on)]
-#
-#     # we want to keep the first part of the text, but shuffle the rest
-#     frozen = []
-#
-#     if frozen_parts > 0:
-#         for i in range(frozen_parts):
-#             frozen.append(parts.pop(0))
-#
-#     final_parts = []
-#
-#     if dropout > 0.0:
-#         final_parts = []
-#         for part in parts:
-#             rand = random.random()
-#             if rand > dropout:
-#                 final_parts.append(part)
-#     else:
-#         final_parts = parts
-#
-#     random.shuffle(final_parts)
-#
-#     return shuffle_on.join(frozen + final_parts)
-#
 
 
 class ImageCaptioningDataset(Dataset):
@@ -248,26 +133,14 @@ def collate_fn(processor):
     return process_collate_fn
 
 
-def send_and_wait_for_response(websocket, message):
-    req = dict(
-        req_from="trainer",
-        type="caption_new",
-        payload=dict(new_caption="hello new caption"),
-    )
-    websocket.send(req)
-    recv_message = websocket.recv()
-    print(f"Received: {recv_message}")
-    return recv_message
-
-
-def send_captions_images(images, captions):
-    req = dict(
-        req_from="trainer",
-        type="captions",
-        payload=dict(images=images, captions=captions),
-    )
-
-    broadcast(json.dumps(req))
+# def send_captions_images(images, captions):
+#     req = dict(
+#         req_from="trainer",
+#         type="captions",
+#         payload=dict(images=images, captions=captions),
+#     )
+#
+#     broadcast(json.dumps(req))
 
 
 def setup_dataset(processor, args):
@@ -280,7 +153,13 @@ def setup_dataset(processor, args):
         split="train",
     )
 
-    ds = ds.train_test_split(test_size=0.2, shuffle=True)
+    print(f"Validation split {args.validation_split}")
+
+    if args.validation_split > 0.0:
+        ds = ds.train_test_split(test_size=args.validation_split, shuffle=True)
+
+    train_ds = ds["train"] if args.validation_split > 0.0 else ds
+    validation_ds = ds["test"] if args.validation_split > 0.0 else []
 
     # AUGMENTATIONS
     train_transforms = Compose(
@@ -295,7 +174,7 @@ def setup_dataset(processor, args):
     )
 
     train_dataset = ImageCaptioningDataset(
-        ds["train"],
+        train_ds,
         processor,
         train_transforms,
         frozen_parts=args.frozen_parts,
@@ -310,19 +189,20 @@ def setup_dataset(processor, args):
         collate_fn=collate_fn(processor),
     )
 
-    val_dataset = ImageCaptioningDataset(ds["test"], processor)
+    val_dataset = ImageCaptioningDataset(validation_ds, processor)
+
     val_dataloader = DataLoader(
-        val_dataset,
+        val_dataset if args.validation_split > 0.0 else [],
         shuffle=False,
         num_workers=4,
         batch_size=1,
         collate_fn=collate_fn(processor),
     )
 
-    print(ds["train"])
+    print(train_ds)
 
-    print(ds["train"][0]["text"])
-    print(ds["train"][0]["image"])
+    print(train_ds[0]["text"])
+    print(train_ds[0]["image"])
 
     return train_dataset, train_dataloader, val_dataset, val_dataloader
 
@@ -354,30 +234,42 @@ def wrap_in_ia3(model, args):
     return model, peft_config
 
 
+MODEL_TO_LORA_MODULES = {
+    "BlipForConditionalGeneration": ".*encoder.*(self_attn|self|crossattention|attention).*(qkv|key|query|value|projection).*",
+    "BlipModel": ".*encoder.*(self_attn|self|crossattention|attention).*(qkv|key|query|value|projection).*",
+    "GitModel": ".*encoder.*(self_attn|self|crossattention|attention).*(k_proj|v_proj|q_proj|out_proj|query|key|value).*",
+}
+
+# (
+#     ".*encoder.*(self_attn|self|crossattention|attention).*(qkv|key|query|value|projection).*"
+#     # ".*encoder.*(self_attn|self|crossattention|attention).*(k_proj|v_proj|q_proj|out_proj|query|key|value).*"
+#     # "query",
+#     # "key",
+#     # "qkv",
+#     # "crossattention.output.dense",
+#     # "attention.output.dense",
+#     # "self_attn.projection",
+# )
+
+
 def wrap_in_lora(model, args):
     print("Using LoRA")
     ## LORA
 
-    lora_rank = 32
-    lora_alpha = 16
-    lora_dropout = 0.05
+    # lora_rank = 32
+    # lora_alpha = 16
+    # lora_dropout = 0.05
     # qkv, projection, fc1, fc2, query, key, value, dense, decoder
-    target_modules = (
-        ".*encoder.*(self_attn|self|crossattention|attention).*(qkv|key|query|value|projection).*"
-        # "query",
-        # "key",
-        # "qkv",
-        # "crossattention.output.dense",
-        # "attention.output.dense",
-        # "self_attn.projection",
-    )
+    target_modules = MODEL_TO_LORA_MODULES[type(model.base_model).__name__]
+
+    peft_args = {**{"bias": "none", "target_modules": target_modules}, **args.peft_args}
 
     peft_config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        bias="none",
-        target_modules=target_modules,
+        # r=lora_rank,
+        # lora_alpha=lora_alpha,
+        # lora_dropout=lora_dropout,
+        # target_modules=target_modules,
+        **peft_args,
     )
 
     model = get_peft_model(model, peft_config)
@@ -387,46 +279,70 @@ def wrap_in_lora(model, args):
 
 
 def get_scheduler(optimizer, train_dataset_length, args):
-    ## SCHEDULER
+    # Placeholder scheduler
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lambda v: v])
+    scheduler_args = args.scheduler_args
 
-    # scheduler = torch.optim.lr_scheduler.CyclicLR(
-    #     optimizer, 2e-5, 2e-3, step_size_up=100, step_size_down=100, cycle_momentum=False
-    # )
+    if args.lr_scheduler == "CyclicLR":
+        scheduler_args = {
+            **{
+                "t_max": 2e-5,
+                "T_min": 2e-3,
+                "step_size_up": 100,
+                "step_size_down": 100,
+                "cycle_momentum": False,
+            },
+            **scheduler_args,
+        }
+        scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, **scheduler_args)
 
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    #     optimizer, T_max=int(len(train_dataset)/epochs), eta_min=0.5
-    # )
+    if args.lr_scheduler == "OneCycleLR":
+        epochs = args.epochs
 
-    # scheduler = torch.ptim.lr_scheduler.ConstantLR(optimizer)
-
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(
-    #     optimizer,
-    #     max_lr=1.2,
-    #     steps_per_epoch=int(len(train_dataloader) / gradient_accumulation_steps),
-    #     epochs=epochs,
-    # )
+        scheduler_args = {
+            **{
+                "max_lr": 1.2,
+                "steps_per_epoch": int(
+                    train_dataset_length / args.gradient_accumulation_steps
+                ),
+                "epochs": epochs,
+            },
+            **scheduler_args,
+        }
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+        )
 
     # CosineAnnealingLR
 
-    n_epochs = args.epochs
-    steps = n_epochs * (
-        train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)
-    )
-    scheduler_args = {"T_max": steps}
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, steps)
+    # we can calculate steps by the arguments
+    if args.lr_scheduler == "CosineAnnealingLR":
+        n_epochs = args.epochs
+        steps = n_epochs * (
+            train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)
+        )
+        scheduler_args = {**{"T_max": steps}, **scheduler_args}
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, **scheduler_args
+        )
 
-    # # CosineAnnealingWarmRestarts
-    #
-    # n_epochs = 1
-    # steps = int(
-    #     n_epochs
-    #     * (train_dataset_length / (args.batch_size * args.gradient_accumulation_steps))
-    # )
-    # t_mult = 2
-    # scheduler_args = {"steps": steps, "T_mult": t_mult}
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-    #     optimizer, **scheduler_args
-    # )
+    if args.lr_scheduler == "CosineAnnealingWarmRestarts":
+        n_epochs = 1
+        steps = int(
+            n_epochs
+            * (
+                train_dataset_length
+                / (args.batch_size * args.gradient_accumulation_steps)
+            )
+        )
+        t_mult = 2
+        scheduler_args = {**{"steps": steps, "T_mult": t_mult}, **scheduler_args}
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, **scheduler_args
+        )
+
+    if scheduler is None:
+        raise RuntimeError("Invalid scheduler")
 
     return scheduler, scheduler_args
 
@@ -434,41 +350,54 @@ def get_scheduler(optimizer, train_dataset_length, args):
 def get_optimizer(model, args):
     # OPTIMIZERS
 
+    optimizer = None
+    optimizer_args = args.optimizer_args
+
     # PRODIGY
 
-    lr = 1.0
-    weight_decay = 0.01
-    optimizer_args = {
-        "lr": lr,
-        "weight_decay": weight_decay,
-        # "safeguard_warmup": True,
-        "use_bias_correction": True,
-        "d_coef": 1.5,
-    }
-    # optimizer_args = {"lr": lr, }
-    print("Using Prodigy optimizer")
-    print(optimizer_args)
-    optimizer = Prodigy(model.parameters(), **optimizer_args)
+    if args.optimizer == "Prodigy":
+        # lr = args.learning_rate
+        optimizer_args = {
+            **optimizer_args,
+        }
+        print("Using Prodigy optimizer")
+        print(optimizer_args)
+        optimizer = Prodigy(model.parameters(), **optimizer_args)
 
     # DADAPTATION
 
-    # from dadaptation import DAdaptAdam
+    if args.optimizer == "DAdaptAdam":
+        from dadaptation import DAdaptAdam
 
-    # lr = 1.0
-    # weight_decay = 0.05
-    # optimizer_args = {"lr": lr, "decouple": True}
-    # print("Using DAdaptation optimizer")
-    # print(optimizer_args)
-    # optimizer = DAdaptAdam(model.parameters(), weight_decay=weight_decay,
-    #   **optimizer_args)
+        lr = 1.0
+        weight_decay = 0.05
+        optimizer_args = {"lr": lr, "decouple": True}
+        print("Using DAdaptation optimizer")
+        print(optimizer_args)
+        optimizer = DAdaptAdam(
+            model.parameters(), weight_decay=weight_decay, **optimizer_args
+        )
 
     # ADAM
-    # lr = 2e-3
-    # weight_decay = 1e-4
-    # optimizer_args = {"lr": lr, "weight_decay": weight_decay}
-    # optimizer = torch.optim.AdamW(model.parameters(), **optimizer_args)
+    if args.optimizer == "AdamW":
+        lr = args.learning_rate
+        # weight_decay = 1e-4
+        optimizer_args = {**{"lr": lr}, **optimizer_args}
+        optimizer = torch.optim.AdamW(model.parameters(), **optimizer_args)
+
+    if optimizer is None:
+        raise RuntimeError("Invalid optimizer")
 
     return optimizer, optimizer_args
+
+
+def compute_metrics(eval_pred, processor, wer):
+    logits, labels = eval_pred
+    predicted = logits.argmax(-1)
+    decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
+    decoded_predictions = processor.batch_decode(predicted, skip_special_tokens=True)
+    wer_score = wer.compute(predictions=decoded_predictions, references=decoded_labels)
+    return {"wer_score": wer_score}
 
 
 def get_blip_model(args):
@@ -479,7 +408,6 @@ def get_blip_model(args):
     blip_config.attention_probs_dropout_prob = 0.3
 
     model = BlipForConditionalGeneration.from_pretrained(
-        # "Salesforce/blip-image-captioning-base"
         args.model_name_or_path,
         device_map={"": 0},
         config=blip_config,
@@ -488,100 +416,219 @@ def get_blip_model(args):
     return model
 
 
-async def websocket_process(message, websocket):
-    print(message)
-    await websocket.send("hi")
+def get_git_model(args):
+    git_config = AutoConfig.from_pretrained(args.model_name_or_path)
+
+    git_config.hidden_dropout_prob = 0.2
+    git_config.attention_probs_dropout_prob = 0.3
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        device_map={"": 0},
+        config=git_config,
+    )
+
+    return model
 
 
-# Websocket clients connected
-CLIENTS = set()
+def get_auto_model(args):
+    auto_config = AutoConfig.from_pretrained(
+        args.model_name_or_path, **args.model_config_args
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        config=auto_config,
+        # device_map="auto",
+        # torch_dtype=torch.float16,
+    )
+
+    return model
 
 
-def broadcast(message):
-    for queue in CLIENTS:
-        queue.put_nowait(message)
+def process_batch(batch, model, processor, accelerator, args):
+    # input_ids = batch.pop("input_ids").to(accelerator.device)
+    # pixel_values = batch.pop("pixel_values").to(accelerator.device)
+    # attention_mask = batch.pop("attention_mask").to(accelerator.device)
 
-
-async def broadcast_and_wait(message) -> list[str]:
-    for queue in CLIENTS:
-        queue.put_nowait(message)
-
-    responses = []
-    for queue in CLIENTS:
-        responses.append(await queue.get())
-
-    return responses
-
-
-async def relay(queue, websocket):
-    while True:
-        # Implement custom logic based on queue.qsize() and
-        # websocket.transport.get_write_buffer_size() here.
-        message = await queue.get()
-        await websocket.send(message)
-
-
-async def websocket_handler(websocket):
-    queue = asyncio.Queue()
-    # relay_task = asyncio.create_task(relay(queue, websocket))
-    CLIENTS.add(queue)
-    try:
-        await websocket.wait_closed()
-    finally:
-        CLIENTS.remove(queue)
-        # relay_task.cancel()
-
-
-async def start_websocket_server():
-    async with serve(websocket_handler, "localhost", 8765):
-        await asyncio.Future()  # run forever
-
-
-def test_dataloader(t_dataloader):
-    # start_websocket_server()
-
-    for i, batch in enumerate(t_dataloader):
-        input_ids = batch.pop("input_ids")
-        pixel_values = batch.pop("pixel_values")
-        attention_mask = batch.pop("attention_mask")
-
-        captions = processor.batch_decode(input_ids, skip_special_tokens=True)
-        images = [Image.fromarray(pixels) for pixels in pixel_values]
-
-        send_captions_images(images, captions)
-
-
-def process_batch(batch, model, processor, global_step, accelerator, args):
-    global_step += 1
-
-    input_ids = batch.pop("input_ids").to(accelerator.device)
-    pixel_values = batch.pop("pixel_values").to(accelerator.device)
-    attention_mask = batch.pop("attention_mask").to(accelerator.device)
+    # print(batch.keys())
+    #
+    # for k in batch.keys():
+    #     print(k, batch[k].shape)
 
     with accelerator.autocast():
-        outputs = model(
-            input_ids=input_ids,
-            pixel_values=pixel_values,
-            attention_mask=attention_mask,
-            labels=input_ids,
-        )
+        # labels = input_ids
+        # if isinstance(model.base_model, GitModel):
+        #     kwargs = {"labels": labels}
+        # else:
+        #     kwargs = {}
+
+        # outputs = model(
+        #     input_ids=input_ids,
+        #     pixel_values=pixel_values,
+        #     attention_mask=attention_mask,
+        #     **kwargs,
+        # )
+        outputs = model(**batch)
+
+        logits = outputs["logits"]
+
+        # print(outputs.keys())
+
+        # print(processor.vision
+        # vision_config = model.base_model.image_encoder.vision_config
+
+        # print('base model', type(model.get_base_model()).__name__)
+        # Blip
+        if isinstance(model.get_base_model(), BlipForConditionalGeneration):
+            vision_config = model.base_model.vision_model.config
+            text_config = model.base_model.text_decoder.config
+            vocab_size = text_config.vocab_size  # 30522
+
+        # GIT
+        if isinstance(model.get_base_model(), GitForCausalLM):
+            vision_config = model.get_base_model().git.config.vision_config
+            vocab_size = model.get_base_model().config.vocab_size  # 30522
+
+        # print(vision_config)
+
+        # patch_size = 16  # git base coco
+        # patch_size = 14  # git large coco
+        # patch_size = 16
+        # git_image_size = 224
+        # image_size = 384
+
+        patch_size = vision_config.patch_size
+        image_size = vision_config.image_size
+        num_image_tokens = int((image_size / patch_size) ** 2 + 1)
+
+        if isinstance(model.get_base_model(), GitForCausalLM):
+            num_image_tokens = (
+                model.get_base_model()
+                .git.encoder.layer[0]
+                .attention.self.image_patch_tokens
+            )
+
+        # print("num_image_tokens", num_image_tokens)
+        # print("logits", logits.shape)
+
+        if "input_ids" in batch:
+            # we are doing next-token prediction; shift prediction scores and input ids by one
+
+            if isinstance(model.get_base_model(), GitForCausalLM):
+                shifted_logits = logits[:, num_image_tokens:-1, :].contiguous()
+            else:
+                shifted_logits = logits[:, :-1, :].contiguous()
+
+            # print("shifted_logits", shifted_logits.shape)
+            labels = batch["input_ids"].clone()
+            # print("labels", labels.shape)
+            labels = labels[:, 1:].contiguous()
+            # print("labels contiguous", labels.shape)
+            # Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+            # 'none': no reduction will be applied, 'mean': the weighted mean of the
+            # output is taken, 'sum': the output will be summed.
+            reduction = "mean"  # 'none', 'mean', 'sum'
+
+            # Specifies the amount of smoothing when computing the loss, where 0.0 means no smoothing.
+            # https://arxiv.org/abs/1512.00567
+            label_smoothing = 0.1
+
+            loss_fct = nn.CrossEntropyLoss(
+                reduction=reduction, label_smoothing=label_smoothing
+            )
+
+            shifted_logits_view = shifted_logits.view(-1, vocab_size)
+            labels_view = labels.view(-1)
+
+            # torch.Size([0, 30522]) torch.Size([30])
+            # print(shifted_logits_view.shape, labels_view.shape)
+
+            loss = loss_fct(shifted_logits_view, labels_view)
+
+            if reduction == "none":
+                loss = loss.view(outputs["logits"].size(0), -1).sum(1)
+
+        # feat = outputs["logits"]
+        # target = input_ids.clone()
+        # # need_predict = torch.tensor([[0] + [1] * len(target) + [1]])
+        # # need_predict = torch.Tensor().to(accelerator.device)
+        #
+        # feat = feat[:, :-1].contiguous()
+        # target = target[:, 1:].contiguous()
+        # # print(target.shape)
+        # # print(feat.shape)
+        # # need_predict = need_predict[:, 1:].contiguous()
+        #   # Git TransformerDecoderTextualHead text_decoder vocab size
+        # feat = feat.view(-1, vocab_size)
+        # target = target.view(-1)
+        #
+        # print(target.shape)
+        # print(feat.shape)
+        # # need_predict = need_predict.view(-1)
+        # # print(need_predict.shape)
+        # #
+        # # valid_mask = need_predict == 1
+        # # print(valid_mask.shape)
+        # # target = target[valid_mask]
+        # # feat = feat[valid_mask]
+        #
+        # loss = nn.CrossEntropyLoss(reduction="none")(feat, target)
+
+        # log_probs = -nn.functional.log_softmax(logits, dim=-1)
+        #
+        # print(labels)
+        #
+        # print(log_probs)
+        # if labels.dim() == log_probs.dim() - 1:
+        #     labels = labels.unsqueeze(-1)
+        #
+        # nll_loss = nn.functional.nll_loss(log_probs, labels, reduction="none")
+        #
+        # print(nll_loss)
+
+        # ignore_index: int = -100
+        # padding_mask = labels.eq(ignore_index)
+        # In case the ignore_index is -100, the gather will fail, so we replace labels by 0. The padding_mask
+        # will ignore them in any case.
+        # labels = torch.clamp(labels, min=0)
+        #
+        # nll_loss = log_probs.gather(dim=-1, index=labels)
+        # smoothed_loss = log_probs.sum(dim=-1, keepdim=True, dtype=torch.float32)
+        #
+        # nll_loss.masked_fill_(padding_mask, 0.0)
+        # smoothed_loss.masked_fill_(padding_mask, 0.0)
+        #
+        # num_active_elements = padding_mask.numel() - padding_mask.long().sum()
+        # nll_loss = nll_loss.sum() / num_active_elements
+        # smoothed_loss = smoothed_loss.sum() / (num_active_elements * log_probs.shape[-1])
+        #
+        # epsilon = 0.1
+        # loss = (1 - epsilon) * nll_loss + epsilon * smoothed_loss
+
+        # print(outputs.keys())
+        #
+        # import sys
+        #
+        # sys.exit(2)
 
         if args.interactive is True:
-            captions = processor.batch_decode(
-                input_ids, skip_special_tokens=True
-            )
-            images = [Image.fromarray(pixels) for pixels in pixel_values]
+            # TODO: Not ready yet
+            # captions = processor.batch_decode(input_ids, skip_special_tokens=True)
+            # images = [Image.fromarray(pixels) for pixels in pixel_values]
 
-            send_captions_images(images, captions)
-
-            send_and_wait_for_response()
+            # send_captions_images(images, captions)
+            #
+            # send_and_wait_for_response()
 
             # update run with response data
 
             print("interactive")
-    loss = outputs.loss.mean()
+    # print(outputs.keys())
+    # print(nll_loss)
+    # loss = loss.mean()
 
-    return loss
+    return loss.mean()
 
 
 def train(model, processor, train_dataloader, val_dataloader, args):
@@ -609,17 +656,17 @@ def train(model, processor, train_dataloader, val_dataloader, args):
     else:
         raise ValueError(f"Invalid PEFT module: {peft_module}")
 
-    if args.interactive:
-        websocket = connect("ws://localhost:8765")
-        websocket.send(dict(req_from="trainer", type="connect"))
+    # if args.interactive:
+    #     websocket = connect("ws://localhost:8765")
+    #     websocket.send(dict(req_from="trainer", type="connect"))
 
     # OPTIMIZER
     optimizer, optimizer_args = get_optimizer(model, args)
 
     # SCHEDULER
-    scheduler, scheduler_args = get_scheduler(
-        optimizer, len(train_dataloader.dataset), args
-    )
+    # scheduler, scheduler_args = get_scheduler(
+    #     optimizer, len(train_dataloader.dataset), args
+    # )
 
     # OUTPUT
     output_dir = Path(args.output_dir)
@@ -630,7 +677,7 @@ def train(model, processor, train_dataloader, val_dataloader, args):
     # ACCELERATOR
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        log_with="wandb",
+        log_with=args.log_with,
     )
 
     def clean_dict(unclean_dict):
@@ -647,14 +694,14 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         return cleaned_dict
 
     project_config = {
-        "lr": args.lr,
+        "lr": args.learning_rate,
         "batch_size": args.batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "gradient_checkpointing": args.gradient_checkpointing,
         "optimizer": type(optimizer).__name__,
         "optimizer_args": optimizer_args,
-        "scheduler": type(scheduler).__name__,
-        "scheduler_args": scheduler_args,
+        # "scheduler": type(scheduler).__name__,
+        # "scheduler_args": scheduler_args,
         "peft": type(peft_config).__name__,
         "peft_config": {**clean_dict(peft_config.__dict__)},
     }
@@ -663,8 +710,8 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
     accelerator.init_trackers(project_name=args.training_name, config=project_config)
 
-    model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, val_dataloader, scheduler
+    model, optimizer, train_dataloader, val_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, val_dataloader
     )
 
     if args.gradient_checkpointing:
@@ -675,6 +722,8 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
     # Should we compile here? lets see
     # model = torch.compile(model, backend="inductor")
+    # model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
+    # model = model.to_bettertransformer()
 
     global_step = 0
 
@@ -693,22 +742,8 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         # BATCH
         for step, batch in enumerate(t_dataloader):
             with accelerator.accumulate(model):
-                loss = process_batch(batch, model, global_step, accelerator)
-                # global_step += 1
-                #
-                # input_ids = batch.pop("input_ids")
-                # pixel_values = batch.pop("pixel_values")
-                # attention_mask = batch.pop("attention_mask")
-                #
-                # with accelerator.autocast():
-                #     outputs = model(
-                #         input_ids=input_ids,
-                #         pixel_values=pixel_values,
-                #         attention_mask=attention_mask,
-                #         labels=input_ids,
-                #     )
-                #
-                # loss = outputs.loss.mean()
+                global_step += 1
+                loss = process_batch(batch, model, processor, accelerator, args)
 
                 accelerator.backward(loss)
 
@@ -721,7 +756,7 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
                 optimizer.step()
 
-                scheduler.step()
+                # scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
 
                 current_loss = loss.detach().item()
@@ -734,18 +769,24 @@ def train(model, processor, train_dataloader, val_dataloader, args):
                 loss_total += current_loss
                 avg_loss = loss_total / len(loss_list)
 
+                # print(scheduler.get_lr())
+                # print(optimizer)
                 loggable = {
                     "loss/avg": avg_loss,
                     "loss/current": current_loss,
-                    "lr/lr": scheduler.get_last_lr()[0],
+                    # "lr/lr": scheduler.get_last_lr()[0],
+                    "lr/lr": args.learning_rate,
                 }
 
                 if "d" in optimizer.param_groups[0]:
                     loggable["lr/d*lr"] = (
-                        optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
+                        # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
+                        optimizer.param_groups[0].get("d")
+                        * args.learning_rate
                     )
 
-                accelerator.log(loggable, step=global_step)
+                # accelerator.log(loggable, step=global_step)
+                accelerator.log(loggable)
                 t_dataloader.set_postfix(
                     {
                         "loss": avg_loss,
@@ -755,26 +796,11 @@ def train(model, processor, train_dataloader, val_dataloader, args):
                     }
                 )
 
-                # process wait for?
-
         # VALIDATION
         v_dataloader = val_dataloader
         with torch.no_grad():
             for val_step, batch in enumerate(v_dataloader):
-                loss = process_batch(batch, model, global_step, accelerator)
-                # input_ids = batch.pop("input_ids").to(accelerator.device)
-                # pixel_values = batch.pop("pixel_values").to(accelerator.device)
-                # attention_mask = batch.pop("attention_mask").to(accelerator.device)
-                #
-                # with accelerator.autocast():
-                #     outputs = model(
-                #         input_ids=input_ids,
-                #         pixel_values=pixel_values,
-                #         attention_mask=attention_mask,
-                #         labels=input_ids,
-                #     )
-                #
-                # loss = outputs.loss.mean()
+                loss = process_batch(batch, model, processor, accelerator, args)
 
                 current_loss = loss.detach().item()
 
@@ -791,7 +817,8 @@ def train(model, processor, train_dataloader, val_dataloader, args):
 
         loggable = {"loss/val": avg_loss}
 
-        accelerator.log(loggable, step=global_step)
+        # accelerator.log(loggable, step=global_step)
+        accelerator.log(loggable)
 
         # load image
         for i, val in enumerate(val_dataloader):
@@ -839,8 +866,10 @@ def main(args):
 
     args.training_start = gmtime()
 
-    model = get_blip_model(args)
-    model.enable_input_require_grads()
+    # model = get_blip_model(args)
+    model = get_auto_model(args)
+    # model = get_git_model(args)
+    # model.enable_input_require_grads()
 
     processor = AutoProcessor.from_pretrained(
         args.model_name_or_path,
@@ -854,8 +883,6 @@ def main(args):
 
     print(f"Training: {len(train_dataloader)}")
     print(f"Validation: {len(val_dataloader)}")
-
-    # test_dataloader(train_dataloader)
 
     train(model, processor, train_dataloader, val_dataloader, args)
 
@@ -874,7 +901,9 @@ if __name__ == "__main__":
         help="Directory for where the image/captions are stored. Is recursive.",
     )
 
-    argparser.add_argument("--lr", help="Learning rate for the training")
+    argparser.add_argument(
+        "--learning_rate", type=float, help="Learning rate for the training"
+    )
 
     argparser.add_argument(
         "--model_name_or_path",
@@ -966,6 +995,39 @@ if __name__ == "__main__":
         help="Model configuration parameters (dropout, device_map, ...)",
     )
 
+    argparser.add_argument(
+        "--optimizer",
+        choices=["Prodigy", "AdamW"],
+        help="Optimizer to use",
+    )
+
+    argparser.add_argument(
+        "--lr_scheduler",
+        choices=[
+            "CosineAnnealingLR",
+            "CosineAnnealingWarmRestarts",
+            "CyclicLR",
+            "OneCycleLR",
+        ],
+        help="Learning rate scheduler",
+    )
+
+    argparser.add_argument(
+        "--scheduler_args",
+        default={},
+        help="Arguments for the learning rate scheduler",
+    )
+
+    argparser.add_argument(
+        "--validation_split",
+        type=float,
+        default=0.0,
+        help="Split for the validation dataset",
+    )
+
+    argparser.add_argument("--log_with", type=str, default=None, help="Log with")
+    argparser.add_argument("--peft_args", default={}, help="PEFT args")
+
     # epochs = 5
     # save_every_n_epochs = 5
     # gradient_accumulation_steps = 2
@@ -980,5 +1042,21 @@ if __name__ == "__main__":
     #
     # peft_module = "LoRA"
 
+    argparser.add_argument(
+        "--config_file", default=None, help="Config file with all the arguments"
+    )
+
     args = argparser.parse_args()
+
+    if args.config_file is not None:
+        with open(args.config_file, "rb") as f:
+            toml_args = tomllib.load(f)
+
+            tmp = {
+                **vars(args),
+                **toml_args,
+            }
+            args = argparse.Namespace(**tmp)
+            print(args)
+
     main(args)
