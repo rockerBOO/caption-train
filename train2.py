@@ -1,18 +1,20 @@
 import argparse
-import json
 import random
 from pathlib import Path
 from time import gmtime, strftime
+from typing import List
+import math
 
 import tomllib
 import torch
-from torch import nn
 import torchvision.transforms as T
 from accelerate import Accelerator
 from datasets import load_dataset
-from evaluate import load
+
+# from evaluate import load
 from peft import IA3Config, LoraConfig, get_peft_model
 from prodigyopt import Prodigy
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import (
     Compose,
@@ -21,12 +23,12 @@ from torchvision.transforms import (
 from tqdm import tqdm
 from transformers import (
     AutoConfig,
-    AutoModel,
+    # AutoModel,
     AutoModelForCausalLM,
     AutoProcessor,
-    GitModel,
-    GitForCausalLM,
     BlipForConditionalGeneration,
+    # GitModel,
+    GitForCausalLM,
 )
 
 from caption_train.captions import setup_metadata, shuffle_caption
@@ -37,12 +39,13 @@ from caption_train.captions import setup_metadata, shuffle_caption
 @torch.no_grad()
 def sample(example, model, processor, accelerator):
     # with accelerator.autocast():
-    #     inputs = processor(images=example["image_filename"], return_tensors="pt").to(
+    #     inputs = processor(images=example["image_filename"],
+    #     return_tensors="pt").to(
     #         accelerator.device
     #     )
     # pixel_values = inputs.pixel_values
 
-    with accelerator.autocast():
+    with accelerator.autocast(), torch.inference_mode():
         generated_ids = model.generate(
             pixel_values=example["pixel_values"],
             num_beams=3,
@@ -119,7 +122,9 @@ def collate_fn(processor):
         processed_batch = {}
         for key in batch[0].keys():
             if key != "text":
-                processed_batch[key] = torch.stack([example[key] for example in batch])
+                processed_batch[key] = torch.stack(
+                    [example[key] for example in batch]
+                )
             else:
                 text_inputs = processor.tokenizer(
                     [example["text"] for example in batch],
@@ -127,7 +132,9 @@ def collate_fn(processor):
                     return_tensors="pt",
                 )
                 processed_batch["input_ids"] = text_inputs["input_ids"]
-                processed_batch["attention_mask"] = text_inputs["attention_mask"]
+                processed_batch["attention_mask"] = text_inputs[
+                    "attention_mask"
+                ]
         return processed_batch
 
     return process_collate_fn
@@ -209,16 +216,14 @@ def setup_dataset(processor, args):
 
 def wrap_in_ia3(model, args):
     print("Using IA3")
-    ## IA3
+    # -- IA3
 
     # for key in model.state_dict().keys():
     #     print(key)
 
     # qkv, projection, fc1, fc2, query, key, value, dense, decoder
     # target_modules = ["query", "value"]
-    target_modules = (
-        ".*encoder.*(self_attn|self|crossattention).*(qkv|key|value|dense|projection).*"
-    )
+    target_modules = ".*encoder.*(self_attn|self|crossattention).*(qkv|key|value|dense|projection).*"
     ff_modules = [
         "crossattention.output.dense",
         "attention.output.dense",
@@ -262,7 +267,10 @@ def wrap_in_lora(model, args):
     # qkv, projection, fc1, fc2, query, key, value, dense, decoder
     target_modules = MODEL_TO_LORA_MODULES[type(model.base_model).__name__]
 
-    peft_args = {**{"bias": "none", "target_modules": target_modules}, **args.peft_args}
+    peft_args = {
+        **{"bias": "none", "target_modules": target_modules},
+        **args.peft_args,
+    }
 
     peft_config = LoraConfig(
         # r=lora_rank,
@@ -280,7 +288,9 @@ def wrap_in_lora(model, args):
 
 def get_scheduler(optimizer, train_dataset_length, args):
     # Placeholder scheduler
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lambda v: v])
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=[lambda v: v]
+    )
     scheduler_args = args.scheduler_args
 
     if args.lr_scheduler == "CyclicLR":
@@ -294,23 +304,26 @@ def get_scheduler(optimizer, train_dataset_length, args):
             },
             **scheduler_args,
         }
-        scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, **scheduler_args)
+        scheduler = torch.optim.lr_scheduler.CyclicLR(
+            optimizer, **scheduler_args
+        )
 
     if args.lr_scheduler == "OneCycleLR":
         epochs = args.epochs
 
         scheduler_args = {
             **{
-                "max_lr": 1.2,
                 "steps_per_epoch": int(
-                    train_dataset_length / args.gradient_accumulation_steps
+                    train_dataset_length
+                    / (args.batch_size * args.gradient_accumulation_steps)
                 ),
                 "epochs": epochs,
             },
             **scheduler_args,
         }
+        print(scheduler_args)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
+            optimizer, **scheduler_args
         )
 
     # CosineAnnealingLR
@@ -318,13 +331,21 @@ def get_scheduler(optimizer, train_dataset_length, args):
     # we can calculate steps by the arguments
     if args.lr_scheduler == "CosineAnnealingLR":
         n_epochs = args.epochs
-        steps = n_epochs * (
-            train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)
+        print(n_epochs * train_dataset_length)
+        steps = (n_epochs * train_dataset_length) / (
+            args.batch_size * args.gradient_accumulation_steps
+        )
+        steps = n_epochs * train_dataset_length
+        print(
+            "CosineAnnealingLR",
+            f"({n_epochs} * {train_dataset_length}) / ({args.batch_size} * {args.gradient_accumulation_steps})",
         )
         scheduler_args = {**{"T_max": steps}, **scheduler_args}
+        print(scheduler_args)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, **scheduler_args
         )
+        print(scheduler)
 
     if args.lr_scheduler == "CosineAnnealingWarmRestarts":
         n_epochs = 1
@@ -336,7 +357,10 @@ def get_scheduler(optimizer, train_dataset_length, args):
             )
         )
         t_mult = 2
-        scheduler_args = {**{"steps": steps, "T_mult": t_mult}, **scheduler_args}
+        scheduler_args = {
+            **{"steps": steps, "T_mult": t_mult},
+            **scheduler_args,
+        }
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, **scheduler_args
         )
@@ -356,13 +380,15 @@ def get_optimizer(model, args):
     # PRODIGY
 
     if args.optimizer == "Prodigy":
-        # lr = args.learning_rate
+        #
         optimizer_args = {
             **optimizer_args,
         }
         print("Using Prodigy optimizer")
         print(optimizer_args)
-        optimizer = Prodigy(model.parameters(), **optimizer_args)
+        optimizer = Prodigy(
+            model.parameters(), lr=args.learning_rate, **optimizer_args
+        )
 
     # DADAPTATION
 
@@ -395,8 +421,12 @@ def compute_metrics(eval_pred, processor, wer):
     logits, labels = eval_pred
     predicted = logits.argmax(-1)
     decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
-    decoded_predictions = processor.batch_decode(predicted, skip_special_tokens=True)
-    wer_score = wer.compute(predictions=decoded_predictions, references=decoded_labels)
+    decoded_predictions = processor.batch_decode(
+        predicted, skip_special_tokens=True
+    )
+    wer_score = wer.compute(
+        predictions=decoded_predictions, references=decoded_labels
+    )
     return {"wer_score": wer_score}
 
 
@@ -628,7 +658,51 @@ def process_batch(batch, model, processor, accelerator, args):
     # print(nll_loss)
     # loss = loss.mean()
 
+    # print(f"batch {batch.size()}")
+    for key, item in batch.items():
+        print(f"{key} {item.size()}")
+
+    print(f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}")
     return loss.mean()
+
+
+def step_log(logs, lr_scheduler, optimizer, accelerator, args):
+    logs = {
+        "lr/lr": lr_scheduler.get_last_lr()[0],
+        # "lr/lr": args.learning_rate,
+        **logs,
+    }
+
+    if "d" in optimizer.param_groups[0]:
+        logs["lr/d*lr"] = (
+            # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
+            optimizer.param_groups[0].get("d")
+            * args.learning_rate
+        )
+
+    # Plot momentum
+    if args.lr_scheduler == "CyclicLR" or args.lr_scheduler == "OneCycleLR":
+        logs["momentum/betas1"] = optimizer.param_groups[0]["betas"][0]
+
+    return logs
+
+
+class LossRecorder:
+    def __init__(self):
+        self.loss_list: List[float] = []
+        self.loss_total: float = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def moving_average(self) -> float:
+        return self.loss_total / len(self.loss_list)
 
 
 def train(model, processor, train_dataloader, val_dataloader, args):
@@ -664,9 +738,9 @@ def train(model, processor, train_dataloader, val_dataloader, args):
     optimizer, optimizer_args = get_optimizer(model, args)
 
     # SCHEDULER
-    # scheduler, scheduler_args = get_scheduler(
-    #     optimizer, len(train_dataloader.dataset), args
-    # )
+    lr_scheduler, lr_scheduler_args = get_scheduler(
+        optimizer, len(train_dataloader.dataset), args
+    )
 
     # OUTPUT
     output_dir = Path(args.output_dir)
@@ -700,19 +774,49 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         "gradient_checkpointing": args.gradient_checkpointing,
         "optimizer": type(optimizer).__name__,
         "optimizer_args": optimizer_args,
-        # "scheduler": type(scheduler).__name__,
-        # "scheduler_args": scheduler_args,
+        "lr_scheduler": type(lr_scheduler).__name__,
+        "lr_scheduler_args": lr_scheduler_args,
         "peft": type(peft_config).__name__,
         "peft_config": {**clean_dict(peft_config.__dict__)},
     }
 
-    print(project_config)
-
-    accelerator.init_trackers(project_name=args.training_name, config=project_config)
-
-    model, optimizer, train_dataloader, val_dataloader = accelerator.prepare(
-        model, optimizer, train_dataloader, val_dataloader
+    accelerator.init_trackers(
+        project_name=args.training_name, config=project_config
     )
+
+    if args.log_with in ["wandb", "all"]:
+        wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
+        wandb_tracker.define_metric("current_step", hidden=True)
+        wandb_tracker.define_metric("epoch_step", hidden=True)
+        wandb_tracker.define_metric("validation_step", hidden=True)
+        wandb_tracker.define_metric("loss/current", step_metric="current_step")
+        wandb_tracker.define_metric(
+            "loss/validation_current", step_metric="validation_step"
+        )
+        wandb_tracker.define_metric(
+            "loss/validation_average", step_metric="epoch_step"
+        )
+        wandb_tracker.define_metric(
+            "loss/epoch_average", step_metric="epoch_step"
+        )
+
+    print(f"train dataloader {len(train_dataloader)}  pre-accelerator")
+    (
+        model,
+        optimizer,
+        lr_scheduler,
+        train_dataloader,
+        val_dataloader,
+    ) = accelerator.prepare(
+        model, optimizer, lr_scheduler, train_dataloader, val_dataloader
+    )
+    print(f"train dataloader {len(train_dataloader)} post-accelerator")
+
+    print(
+        f"({len(train_dataloader)} * {args.epochs}) / ({args.gradient_accumulation_steps})"
+    )
+
+    print(lr_scheduler)
 
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -725,25 +829,38 @@ def train(model, processor, train_dataloader, val_dataloader, args):
     # model = torch.compile(model, mode="reduce-overhead", fullgraph=True)
     # model = model.to_bettertransformer()
 
+    progress_bar = tqdm(
+        range(
+            int(
+                math.ceil(
+                    (len(train_dataloader) * args.epochs)
+                    / (args.gradient_accumulation_steps)
+                )
+            )
+        ),
+        smoothing=0,
+        disable=not accelerator.is_local_main_process,
+        desc="steps",
+    )
     global_step = 0
 
-    loss_list = []
-    loss_total = 0.0
-
-    val_loss_list = []
-    val_loss_total = 0.0
+    loss_recorder = LossRecorder()
+    val_loss_recorder = LossRecorder()
 
     # EPOCHS
     for epoch in range(args.epochs):
-        print("Epoch:", epoch + 1)
+        accelerator.print(f"\nepoch {epoch+1}/{args.epochs}")
         # for idx, batch in enumerate(train_dataloader):
-        t_dataloader = tqdm(train_dataloader)
+
+        print(f"dataloader items {len(train_dataloader)}")
 
         # BATCH
-        for step, batch in enumerate(t_dataloader):
+        for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(model):
-                global_step += 1
-                loss = process_batch(batch, model, processor, accelerator, args)
+                optimizer.zero_grad()
+                loss = process_batch(
+                    batch, model, processor, accelerator, args
+                )
 
                 accelerator.backward(loss)
 
@@ -752,73 +869,95 @@ def train(model, processor, train_dataloader, val_dataloader, args):
                     and args.max_grad_norm is not None
                     and args.max_grad_norm != 0.0
                 ):
-                    accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-
-                optimizer.step()
-
-                # scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-
-                current_loss = loss.detach().item()
-                if epoch == 0:
-                    loss_list.append(current_loss)
-                else:
-                    loss_total -= loss_list[step]
-                    loss_list[step] = current_loss
-
-                loss_total += current_loss
-                avg_loss = loss_total / len(loss_list)
-
-                # print(scheduler.get_lr())
-                # print(optimizer)
-                loggable = {
-                    "loss/avg": avg_loss,
-                    "loss/current": current_loss,
-                    # "lr/lr": scheduler.get_last_lr()[0],
-                    "lr/lr": args.learning_rate,
-                }
-
-                if "d" in optimizer.param_groups[0]:
-                    loggable["lr/d*lr"] = (
-                        # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
-                        optimizer.param_groups[0].get("d")
-                        * args.learning_rate
+                    accelerator.clip_grad_norm_(
+                        model.parameters(), args.max_grad_norm
                     )
 
-                # accelerator.log(loggable, step=global_step)
-                accelerator.log(loggable)
-                t_dataloader.set_postfix(
-                    {
-                        "loss": avg_loss,
-                        # "lr": scheduler.get_last_lr()[0],
-                        # "d*lr": optimizer.param_groups[0].get("d")
-                        # * scheduler.get_last_lr()[0],
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                lr_scheduler.step()
+
+                logs = {
+                    "current_step": step + (len(train_dataloader) * epoch),
+                    "loss/current": loss.detach().item(),
+                }
+
+                accelerator.log(logs, step=global_step)
+
+                if accelerator.sync_gradients:
+                    progress_bar.update(1)
+                    global_step += 1
+                    current_loss = loss.detach().item()
+                    loss_recorder.add(
+                        epoch=epoch,
+                        step=int(step / args.gradient_accumulation_steps),
+                        loss=current_loss,
+                    )
+                    logs = {
+                        "loss/average": loss_recorder.moving_average,
                     }
-                )
+
+                    logs = step_log(
+                        logs, lr_scheduler, optimizer, accelerator, args
+                    )
+
+                    accelerator.log(logs, step=global_step)
+
+                    postfix = {
+                        "avg_loss": loss_recorder.moving_average,
+                        "lr": lr_scheduler.get_last_lr()[0],
+                    }
+
+                    if "d" in optimizer.param_groups[0]:
+                        postfix["d*lr"] = (
+                            optimizer.param_groups[0].get("d")
+                            * lr_scheduler.get_last_lr()[0]
+                        )
+
+                    progress_bar.set_postfix(postfix)
+
+        accelerator.wait_for_everyone()
 
         # VALIDATION
+        # ----------
+
+        val_progress_bar = tqdm(
+            range(len(val_dataloader)),
+            smoothing=0,
+            disable=not accelerator.is_local_main_process,
+            desc="validation steps",
+        )
         v_dataloader = val_dataloader
         with torch.no_grad():
             for val_step, batch in enumerate(v_dataloader):
-                loss = process_batch(batch, model, processor, accelerator, args)
+                val_progress_bar.update(1)
+                loss = process_batch(
+                    batch, model, processor, accelerator, args
+                )
 
                 current_loss = loss.detach().item()
 
-                if epoch == 0:
-                    val_loss_list.append(current_loss)
-                else:
-                    val_loss_total -= val_loss_list[val_step]
-                    val_loss_list[val_step] = current_loss
+                val_loss_recorder.add(
+                    epoch=epoch, step=val_step, loss=current_loss
+                )
 
-                val_loss_total += current_loss
+                accelerator.log(
+                    {
+                        "validation_step": val_step
+                        + (len(v_dataloader) * epoch),
+                        "loss/validation_current": current_loss,
+                    },
+                    step=global_step,
+                )
 
-        avg_loss = val_loss_total / len(val_loss_list)
-        print(f"Validation avg loss {avg_loss}")
+        print(f"Validation avg loss {val_loss_recorder.moving_average}")
 
-        loggable = {"loss/val": avg_loss}
+        loggable = {
+            "epoch_step": epoch + 1,
+            "loss/validation_average": val_loss_recorder.moving_average,
+        }
 
-        # accelerator.log(loggable, step=global_step)
-        accelerator.log(loggable)
+        accelerator.log(loggable, step=global_step)
 
         # load image
         for i, val in enumerate(val_dataloader):
@@ -835,6 +974,13 @@ def train(model, processor, train_dataloader, val_dataloader, args):
             save_epoch_to = f"{save_to}_{epoch+1}"
             print(f"Saved to {save_epoch_to}")
             model.save_pretrained(save_epoch_to, safe_serialization=True)
+
+        loggable = {
+            "epoch_step": epoch + 1,
+            "loss/epoch_average": loss_recorder.moving_average,
+        }
+
+        accelerator.log(loggable, step=global_step)
 
     accelerator.end_training()
 
@@ -866,8 +1012,8 @@ def main(args):
 
     args.training_start = gmtime()
 
-    # model = get_blip_model(args)
-    model = get_auto_model(args)
+    model = get_blip_model(args)
+    # model = get_auto_model(args)
     # model = get_git_model(args)
     # model.enable_input_require_grads()
 
@@ -877,9 +1023,12 @@ def main(args):
     )
 
     # DATASET
-    train_dataset, train_dataloader, val_dataset, val_dataloader = setup_dataset(
-        processor, args
-    )
+    (
+        train_dataset,
+        train_dataloader,
+        val_dataset,
+        val_dataloader,
+    ) = setup_dataset(processor, args)
 
     print(f"Training: {len(train_dataloader)}")
     print(f"Validation: {len(val_dataloader)}")
@@ -892,7 +1041,9 @@ if __name__ == "__main__":
 
     # For example: training/sets/
     argparser.add_argument(
-        "--output_dir", required=True, help="Directory to output the resulting model to"
+        "--output_dir",
+        required=True,
+        help="Directory to output the resulting model to",
     )
 
     argparser.add_argument(
@@ -954,7 +1105,9 @@ if __name__ == "__main__":
     )
 
     argparser.add_argument(
-        "--shuffle_captions", action="store_true", help="Shuffle captions when training"
+        "--shuffle_captions",
+        action="store_true",
+        help="Shuffle captions when training",
     )
 
     argparser.add_argument(
@@ -1025,7 +1178,9 @@ if __name__ == "__main__":
         help="Split for the validation dataset",
     )
 
-    argparser.add_argument("--log_with", type=str, default=None, help="Log with")
+    argparser.add_argument(
+        "--log_with", type=str, default=None, help="Log with"
+    )
     argparser.add_argument("--peft_args", default={}, help="PEFT args")
 
     # epochs = 5
@@ -1043,7 +1198,9 @@ if __name__ == "__main__":
     # peft_module = "LoRA"
 
     argparser.add_argument(
-        "--config_file", default=None, help="Config file with all the arguments"
+        "--config_file",
+        default=None,
+        help="Config file with all the arguments",
     )
 
     args = argparser.parse_args()

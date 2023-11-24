@@ -9,7 +9,12 @@ readme = "README.md"
 python = "^3.11"
 marshmallow = "^3.20.1"
 pytest = "^7.4.3"
+prodigyopt = "^1.0"
+evaluate = "^0.4.1"
+wandb = "^0.16.0"
 
+[tool.black]
+line-length=79
 
 [build-system]
 requires = ["poetry-core"]
