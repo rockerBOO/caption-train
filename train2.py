@@ -163,10 +163,39 @@ def setup_dataset(processor, args):
     print(f"Validation split {args.validation_split}")
 
     if args.validation_split > 0.0:
-        ds = ds.train_test_split(test_size=args.validation_split, shuffle=True)
+        if args.test_split > 0.0:
+            # Split between train and test datasets
+            ds = ds.train_test_split(
+                test_size=args.validation_split + args.test_split,
+                shuffle=True,
+                seed=args.seed,
+            )
+
+            print(((args.validation_split / args.test_split) / 2))
+            # Split between validation and test datasets
+            test_dataset = ds["test"].train_test_split(
+                test_size=((args.validation_split / args.test_split) / 2),
+                shuffle=True,
+                seed=args.seed,
+            )
+
+            validation_dataset = (
+                test_dataset["train"] if args.validation_split > 0.0 else []
+            )
+            test_dataset = (
+                test_dataset["test"] if args.test_split > 0.0 else []
+            )
+        else:
+            # Split between train and validation datasets
+            validation_dataset = ds.train_test_split(
+                test_size=args.validation_split, shuffle=True, seed=args.seed
+            )
+            test_dataset = []
+
+        print(validation_dataset)
+        print(test_dataset)
 
     train_ds = ds["train"] if args.validation_split > 0.0 else ds
-    validation_ds = ds["test"] if args.validation_split > 0.0 else []
 
     # AUGMENTATIONS
     train_transforms = Compose(
@@ -191,17 +220,27 @@ def setup_dataset(processor, args):
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        num_workers=4,
+        # num_workers=4,
         batch_size=args.batch_size,
         collate_fn=collate_fn(processor),
     )
 
-    val_dataset = ImageCaptioningDataset(validation_ds, processor)
+    val_dataset = ImageCaptioningDataset(validation_dataset, processor)
 
     val_dataloader = DataLoader(
         val_dataset if args.validation_split > 0.0 else [],
         shuffle=False,
-        num_workers=4,
+        # num_workers=4,
+        batch_size=1,
+        collate_fn=collate_fn(processor),
+    )
+
+    test_dataset = ImageCaptioningDataset(validation_dataset, processor)
+
+    test_dataloader = DataLoader(
+        test_dataset if args.test_split > 0.0 else [],
+        shuffle=False,
+        # num_workers=4,
         batch_size=1,
         collate_fn=collate_fn(processor),
     )
@@ -211,7 +250,14 @@ def setup_dataset(processor, args):
     print(train_ds[0]["text"])
     print(train_ds[0]["image"])
 
-    return train_dataset, train_dataloader, val_dataset, val_dataloader
+    return (
+        train_dataset,
+        train_dataloader,
+        val_dataset,
+        val_dataloader,
+        test_dataset,
+        test_dataloader,
+    )
 
 
 def wrap_in_ia3(model, args):
@@ -662,7 +708,9 @@ def process_batch(batch, model, processor, accelerator, args):
     for key, item in batch.items():
         print(f"{key} {item.size()}")
 
-    print(f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}")
+    print(
+        f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}"
+    )
     return loss.mean()
 
 
@@ -705,7 +753,9 @@ class LossRecorder:
         return self.loss_total / len(self.loss_list)
 
 
-def train(model, processor, train_dataloader, val_dataloader, args):
+def train(
+    model, processor, train_dataloader, val_dataloader, test_dataloader, args
+):
     # epochs = 5
     # save_every_n_epochs = 5
     # gradient_accumulation_steps = 2
@@ -807,8 +857,14 @@ def train(model, processor, train_dataloader, val_dataloader, args):
         lr_scheduler,
         train_dataloader,
         val_dataloader,
+        test_dataloader,
     ) = accelerator.prepare(
-        model, optimizer, lr_scheduler, train_dataloader, val_dataloader
+        model,
+        optimizer,
+        lr_scheduler,
+        train_dataloader,
+        val_dataloader,
+        test_dataloader,
     )
     print(f"train dataloader {len(train_dataloader)} post-accelerator")
 
@@ -1028,12 +1084,22 @@ def main(args):
         train_dataloader,
         val_dataset,
         val_dataloader,
+        test_dataset,
+        test_dataloader,
     ) = setup_dataset(processor, args)
 
     print(f"Training: {len(train_dataloader)}")
     print(f"Validation: {len(val_dataloader)}")
+    print(f"Test: {len(test_dataloader)}")
 
-    train(model, processor, train_dataloader, val_dataloader, args)
+    train(
+        model,
+        processor,
+        train_dataloader,
+        val_dataloader,
+        test_dataloader,
+        args,
+    )
 
 
 if __name__ == "__main__":
