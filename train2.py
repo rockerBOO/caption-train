@@ -4,6 +4,7 @@ from pathlib import Path
 from time import gmtime, strftime
 from typing import List
 import math
+import wandb
 
 import tomllib
 import torch
@@ -30,6 +31,7 @@ from transformers import (
     # GitModel,
     GitForCausalLM,
 )
+from torchmetrics.multimodal.clip_score import CLIPScore
 
 from caption_train.captions import setup_metadata, shuffle_caption
 
@@ -231,7 +233,7 @@ def setup_dataset(processor, args):
         val_dataset if args.validation_split > 0.0 else [],
         shuffle=False,
         # num_workers=4,
-        batch_size=1,
+        batch_size=args.batch_size,
         collate_fn=collate_fn(processor),
     )
 
@@ -241,7 +243,7 @@ def setup_dataset(processor, args):
         test_dataset if args.test_split > 0.0 else [],
         shuffle=False,
         # num_workers=4,
-        batch_size=1,
+        batch_size=args.batch_size,
         collate_fn=collate_fn(processor),
     )
 
@@ -705,12 +707,12 @@ def process_batch(batch, model, processor, accelerator, args):
     # loss = loss.mean()
 
     # print(f"batch {batch.size()}")
-    for key, item in batch.items():
-        print(f"{key} {item.size()}")
-
-    print(
-        f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}"
-    )
+    # for key, item in batch.items():
+    #     print(f"{key} {item.size()}")
+    #
+    # print(
+    #     f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}"
+    # )
     return loss.mean()
 
 
@@ -735,6 +737,41 @@ def step_log(logs, lr_scheduler, optimizer, accelerator, args):
     return logs
 
 
+# def sample(example, model, processor, accelerator):
+@torch.no_grad()
+def evaluate(example, model, processor, metric, accelerator):
+    # We will use CLIPScore with the captions from the image and
+    # compare it with the CLIP score from the caption and the image
+
+    # - lets make a caption
+
+    # with accelerator.autocast():
+    #     inputs = processor(images=example["image_filename"],
+    #     return_tensors="pt").to(
+    #         accelerator.device
+    #     )
+    # pixel_values = inputs.pixel_values
+
+    with accelerator.autocast(), torch.inference_mode():
+        generated_ids = model.generate(
+            pixel_values=example["pixel_values"],
+            num_beams=3,
+            min_length=3,
+            max_length=75,
+        )
+        generated_captions = processor.batch_decode(
+            generated_ids, skip_special_tokens=True
+        )
+
+        score = metric(
+            example["pixel_values"].clamp(0, 1),
+            generated_captions,
+        )
+        score.detach().item()
+
+        return score, generated_captions
+
+
 class LossRecorder:
     def __init__(self):
         self.loss_list: List[float] = []
@@ -754,7 +791,13 @@ class LossRecorder:
 
 
 def train(
-    model, processor, train_dataloader, val_dataloader, test_dataloader, args
+    batch_size,
+    model,
+    processor,
+    train_dataloader,
+    val_dataloader,
+    test_dataloader,
+    args,
 ):
     # epochs = 5
     # save_every_n_epochs = 5
@@ -877,6 +920,12 @@ def train(
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
+    wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
+    
+    if wandb is not None:
+        # Magic
+        wandb_tracker.watch(model, log_freq=100)
+
     # TRAIN
     model.train()
 
@@ -906,9 +955,6 @@ def train(
     # EPOCHS
     for epoch in range(args.epochs):
         accelerator.print(f"\nepoch {epoch+1}/{args.epochs}")
-        # for idx, batch in enumerate(train_dataloader):
-
-        print(f"dataloader items {len(train_dataloader)}")
 
         # BATCH
         for step, batch in enumerate(train_dataloader):
@@ -1017,7 +1063,7 @@ def train(
 
         # load image
         for i, val in enumerate(val_dataloader):
-            if i >= 20:
+            if i >= args.validation_samples or 5:
                 break
             sample(val, model, processor, accelerator)
 
@@ -1038,6 +1084,49 @@ def train(
 
         accelerator.log(loggable, step=global_step)
 
+    accelerator.free_memory()
+
+    metric = CLIPScore(model_name_or_path="openai/clip-vit-base-patch16")
+    metric.to(accelerator.device)
+
+    scores = []
+    for step, example in enumerate(test_dataloader):
+        score, caption = evaluate(
+            example, model, processor, metric, accelerator
+        )
+        print(f"score: {score} - {caption}")
+        scores.append((score, example["pixel_values"], caption))
+
+    print(
+        f"average CLIP score {sum([score[0] for score in scores])/len(scores)}"
+    )
+
+    if args.log_with in ["wandb", "all"]:
+        # data = {
+        #     "clip_scores": [score[0] for score in scores],
+        #     "captions": [caption[1] for caption in scores],
+        # }
+        #
+        # tbl = wandb.Table(columns=["image", "label"])
+        #
+        # images = np.random.randint(0, 255, [2, 100, 100, 3], dtype=np.uint8)
+        # labels = ["panda", "gibbon"]
+        # [tbl.add_data(wandb.Image(image), label) for image, label in zip(images, labels)]
+        tbl = wandb.Table(columns=["clip_score", "image", "caption"])
+
+        [
+            tbl.add_data(score, wandb.Image(image, caption=caption), caption)
+            for (score, image, caption) in scores
+        ]
+        accelerator.log({"clip_scores": tbl}, step=global_step)
+        accelerator.log(
+            {
+                "average_clip_score": sum([score[0] for score in scores])
+                / len(scores)
+            },
+            step=global_step,
+        )
+
     accelerator.end_training()
 
     # SAVE MODEL
@@ -1056,21 +1145,13 @@ def main(args):
     torch.manual_seed(seed)
     random.seed(seed)
 
-    # setup_metadata(Path(args.dataset_dir), captions=[])
-    #
-    # sys.exit(2)
-
-    # args.dataset_dir = "/mnt/900/input/nsfw/captions"
-    # args.training_name = "pov"
-
-    # datetime = strftime("%Y-%m-%d-%H%M%S", gmtime())
-    # args.save_to = f"training/sets/{args.training_name}-{datetime}"
-
     args.training_start = gmtime()
 
-    model = get_blip_model(args)
+    if "blip" in args.model_name_or_path:
+        model = get_blip_model(args)
+    elif "git" in args.model_name_or_path:
+        model = get_git_model(args)
     # model = get_auto_model(args)
-    # model = get_git_model(args)
     # model.enable_input_require_grads()
 
     processor = AutoProcessor.from_pretrained(
@@ -1093,6 +1174,7 @@ def main(args):
     print(f"Test: {len(test_dataloader)}")
 
     train(
+        args.batch_size,
         model,
         processor,
         train_dataloader,
@@ -1242,6 +1324,13 @@ if __name__ == "__main__":
         type=float,
         default=0.0,
         help="Split for the validation dataset",
+    )
+
+    argparser.add_argument(
+        "--validation_samples",
+        type=int,
+        default=5,
+        help="Number of samples to make of the validation dataset",
     )
 
     argparser.add_argument(

@@ -12,6 +12,7 @@ pytest = "^7.4.3"
 prodigyopt = "^1.0"
 evaluate = "^0.4.1"
 wandb = "^0.16.0"
+torchmetrics = "^1.2.0"
 
 [tool.black]
 line-length=79
