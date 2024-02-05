@@ -80,7 +80,7 @@ options:
 Example `config.toml`. Very raw usage of parameters and can be any value also in help.
 
 ```toml
-train_dir="/mnt/900/input/tmp/30_woodcut_style/"
+train_dir = "/mnt/900/input/tmp/30_woodcut_style/"
 seed = 1337
 
 [optimizer_args]

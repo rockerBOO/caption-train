@@ -4,8 +4,7 @@ import glob
 from PIL import Image
 from transformers import (
     AutoProcessor,
-    BlipForConditionalGeneration,
-    BlipImageProcessor
+    AutoModelForVision2Seq,
 )
 from peft import PeftModel
 from pathlib import Path
@@ -18,10 +17,10 @@ import torch
 
 @torch.no_grad()
 def main(args):
-    processor = AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
-    # processor = BlipImageProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
-
-    model = BlipForConditionalGeneration.from_pretrained(args.base_model)
+    processor = AutoProcessor.from_pretrained(
+        "Salesforce/blip-image-captioning-base"
+    )
+    model = AutoModelForVision2Seq.from_pretrained(args.base_model)
 
     accelerator = Accelerator()
     device = accelerator.device
@@ -48,10 +47,15 @@ def main(args):
     batch_size = 16
     for i in range(0, len(images), batch_size):
         batch = [Image.open(img) for img in images[i : i + batch_size]]
-        inputs = processor(images=batch, return_tensors="pt").to(accelerator.device)
+        inputs = processor(images=batch, return_tensors="pt").to(
+            accelerator.device
+        )
         with accelerator.autocast():
             generated_ids = model.generate(
-                pixel_values=inputs.pixel_values, min_length=3, max_length=args.max_token_length
+                pixel_values=inputs.pixel_values,
+                min_length=3,
+                num_beams=3,
+                max_length=args.max_token_length,
             )
 
             generated_captions = processor.batch_decode(
@@ -60,12 +64,15 @@ def main(args):
 
         for idx, img in enumerate(images[i : i + batch_size]):
             results.append({"img": img, "caption": generated_captions[idx]})
-            print(Path(img).stem, generated_captions[idx])
+            img = Path(img)
+            print("gen", img.stem, generated_captions[idx])
 
     if args.save_captions:
         # Save a CSV of the results
         with open("results.csv", "w", newline="") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["idx", "img", "caption"])
+            writer = csv.DictWriter(
+                csvfile, fieldnames=["idx", "img", "caption"]
+            )
             writer.writeheader()
             for r in results:
                 writer.writerow(r)
@@ -75,7 +82,9 @@ def main(args):
             img = Path(result["img"])
 
             with open(
-                img.with_name(img.stem + args.caption_extension), "w", encoding="utf-8"
+                img.with_name(img.stem + args.caption_extension),
+                "w",
+                encoding="utf-8",
             ) as f:
                 f.write(result["caption"])
 
@@ -86,8 +95,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_model",
         type=str,
-        default="Salesforce/blip-image-captioning-large",
-        help="Model to load from hugging face 'Salesforce/blip-image-captioning-large'",
+        default="Salesforce/blip-image-captioning-base",
+        help="Model to load from hugging face 'Salesforce/blip-image-captioning-base'",
     )
 
     parser.add_argument(
@@ -104,13 +113,21 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--beams",
+        default=3,
+        help="Save captions to the images next to the image",
+    )
+
+    parser.add_argument(
         "--save_captions",
         action="store_true",
         help="Save captions to the images next to the image",
     )
 
     parser.add_argument(
-        "--caption_extension", default=".txt", help="Extension to save the captions as"
+        "--caption_extension",
+        default=".txt",
+        help="Extension to save the captions as",
     )
 
     parser.add_argument(

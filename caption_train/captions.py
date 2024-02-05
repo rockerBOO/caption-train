@@ -2,8 +2,17 @@ from pathlib import Path
 import random
 import json
 
+EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"]
+CAPTION_EXTENSION = "txt"
 
-def load_captions(dir: Path, captions=[], true_dir="") -> list[str]:
+
+def load_captions(
+    dir: Path,
+    captions=[],
+    true_dir="",
+    extensions=EXTENSIONS,
+    caption_ext=CAPTION_EXTENSION,
+) -> list[str]:
     found_captions = 0
     for file in dir.iterdir():
         if file.is_dir():
@@ -11,12 +20,12 @@ def load_captions(dir: Path, captions=[], true_dir="") -> list[str]:
             captions = load_captions(file, captions=captions, true_dir=true_dir)
             continue
 
-        if file.suffix.lower() not in [".png", ".jpg", ".jpeg", ".webp"]:
+        if file.suffix.lower() not in extensions:
             continue
 
-        # need to check for images and then get the associated .txt file
+        # need to check for images and then get the associated .{caption_ext} file
 
-        txt_file = file.with_name(f"{file.stem}.txt")
+        txt_file = file.with_name(f"{file.stem}.{caption_ext}")
 
         if txt_file.exists():
             with open(txt_file, "r") as f:
@@ -44,7 +53,7 @@ def setup_metadata(output, captions):
     if len(captions) == 0:
         raise ValueError("yo no captions")
 
-    # print(json.dumps(captions, indent=4))
+    print(json.dumps(captions, indent=4))
 
     print("Saving captions")
 

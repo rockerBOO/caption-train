@@ -2,7 +2,7 @@ import argparse
 import random
 from pathlib import Path
 from time import gmtime, strftime
-from typing import List
+from typing import List, Tuple
 import math
 import wandb
 
@@ -10,9 +10,11 @@ import tomllib
 import torch
 import torchvision.transforms as T
 from accelerate import Accelerator
+from accelerate.utils import set_seed
+import accelerate
 from datasets import load_dataset
 
-# from evaluate import load
+import evaluate
 from peft import IA3Config, LoraConfig, get_peft_model
 from prodigyopt import Prodigy
 from torch import nn
@@ -524,6 +526,105 @@ def get_auto_model(args):
     return model
 
 
+def step_log(logs, lr_scheduler, optimizer, accelerator, args):
+    logs = {
+        "lr/lr": lr_scheduler.get_last_lr()[0],
+        # "lr/lr": args.learning_rate,
+        **logs,
+    }
+
+    if "d" in optimizer.param_groups[0]:
+        logs["lr/d*lr"] = (
+            # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
+            optimizer.param_groups[0].get("d")
+            * args.learning_rate
+        )
+
+    # Plot momentum
+    if args.lr_scheduler == "CyclicLR" or args.lr_scheduler == "OneCycleLR":
+        logs["momentum/betas1"] = optimizer.param_groups[0]["betas"][0]
+
+    return logs
+
+
+# def sample(example, model, processor, accelerator):
+@torch.no_grad()
+def clip_score(model, processor, metric, accelerator):
+    def _score(example):
+        # We will use CLIPScore with the captions from the image and
+        # compare it with the CLIP score from the caption and the image
+
+        # - lets make a caption
+
+        # with accelerator.autocast():
+        #     inputs = processor(images=example["image_filename"],
+        #     return_tensors="pt").to(
+        #         accelerator.device
+        #     )
+        # pixel_values = inputs.pixel_values
+
+        with accelerator.autocast(), torch.inference_mode():
+            generated_ids = model.generate(
+                pixel_values=example["pixel_values"],
+                num_beams=3,
+                min_length=3,
+                max_length=75,
+            )
+            generated_captions = processor.batch_decode(
+                generated_ids, skip_special_tokens=True
+            )
+
+            score = metric(
+                example["pixel_values"].clamp(0, 1),
+                generated_captions,
+            )
+            score.detach().item()
+
+            return score, generated_captions
+        return score
+
+    return _score
+
+
+class LossRecorder:
+    def __init__(self):
+        self.loss_list: List[float] = []
+        self.loss_total: float = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def moving_average(self) -> float:
+        return self.loss_total / len(self.loss_list)
+
+
+def calculate_metrics(wer, processor):
+    def calc(predictions: Tuple[torch.Tensor, torch.Tensor]):
+        logits, labels = predictions
+        predicted = logits.argmax(-1)
+
+        decoded_labels = processor.batch_decode(
+            labels, skip_special_tokens=True
+        )
+        decoded_predictions = processor.batch_decode(
+            predicted, skip_special_tokens=True
+        )
+
+        wer_score = wer.compute(
+            predictions=decoded_predictions, references=decoded_labels
+        )
+
+        return {"wer_score": wer_score}
+
+    return calc
+
+
 def process_batch(batch, model, processor, accelerator, args):
     # input_ids = batch.pop("input_ids").to(accelerator.device)
     # pixel_values = batch.pop("pixel_values").to(accelerator.device)
@@ -535,6 +636,7 @@ def process_batch(batch, model, processor, accelerator, args):
     #     print(k, batch[k].shape)
 
     with accelerator.autocast():
+
         # labels = input_ids
         # if isinstance(model.base_model, GitModel):
         #     kwargs = {"labels": labels}
@@ -547,26 +649,37 @@ def process_batch(batch, model, processor, accelerator, args):
         #     attention_mask=attention_mask,
         #     **kwargs,
         # )
-        outputs = model(**batch)
+        labels = { "labels": batch['input_ids'] }
+        outputs = model(**{**batch, **labels})
 
-        logits = outputs["logits"]
+        # print(outputs)
 
-        # print(outputs.keys())
+        # logits = outputs["logits"]
+        loss = outputs.loss
+        logits = outputs.decoder_logits
+
+
+
+        # precision_metric = evaluate.load("precision")
+        #
+        # results = precision_metric.compute(references=gathered_items, predictions=logits)
+
+        # print("outputs", outputs.keys())
 
         # print(processor.vision
         # vision_config = model.base_model.image_encoder.vision_config
 
         # print('base model', type(model.get_base_model()).__name__)
         # Blip
-        if isinstance(model.get_base_model(), BlipForConditionalGeneration):
-            vision_config = model.base_model.vision_model.config
-            text_config = model.base_model.text_decoder.config
-            vocab_size = text_config.vocab_size  # 30522
-
-        # GIT
-        if isinstance(model.get_base_model(), GitForCausalLM):
-            vision_config = model.get_base_model().git.config.vision_config
-            vocab_size = model.get_base_model().config.vocab_size  # 30522
+        # if isinstance(model.get_base_model(), BlipForConditionalGeneration):
+        #     vision_config = model.base_model.vision_model.config
+        #     text_config = model.base_model.text_decoder.config
+        #     vocab_size = text_config.vocab_size  # 30522
+        #
+        # # GIT
+        # if isinstance(model.get_base_model(), GitForCausalLM):
+        #     vision_config = model.get_base_model().git.config.vision_config
+        #     vocab_size = model.get_base_model().config.vocab_size  # 30522
 
         # print(vision_config)
 
@@ -576,57 +689,57 @@ def process_batch(batch, model, processor, accelerator, args):
         # git_image_size = 224
         # image_size = 384
 
-        patch_size = vision_config.patch_size
-        image_size = vision_config.image_size
-        num_image_tokens = int((image_size / patch_size) ** 2 + 1)
-
-        if isinstance(model.get_base_model(), GitForCausalLM):
-            num_image_tokens = (
-                model.get_base_model()
-                .git.encoder.layer[0]
-                .attention.self.image_patch_tokens
-            )
+        # patch_size = vision_config.patch_size
+        # image_size = vision_config.image_size
+        # num_image_tokens = int((image_size / patch_size) ** 2 + 1)
+        #
+        # if isinstance(model.get_base_model(), GitForCausalLM):
+        #     num_image_tokens = (
+        #         model.get_base_model()
+        #         .git.encoder.layer[0]
+        #         .attention.self.image_patch_tokens
+        #     )
 
         # print("num_image_tokens", num_image_tokens)
         # print("logits", logits.shape)
 
-        if "input_ids" in batch:
-            # we are doing next-token prediction; shift prediction scores and input ids by one
-
-            if isinstance(model.get_base_model(), GitForCausalLM):
-                shifted_logits = logits[:, num_image_tokens:-1, :].contiguous()
-            else:
-                shifted_logits = logits[:, :-1, :].contiguous()
-
-            # print("shifted_logits", shifted_logits.shape)
-            labels = batch["input_ids"].clone()
-            # print("labels", labels.shape)
-            labels = labels[:, 1:].contiguous()
-            # print("labels contiguous", labels.shape)
-            # Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
-            # 'none': no reduction will be applied, 'mean': the weighted mean of the
-            # output is taken, 'sum': the output will be summed.
-            reduction = "mean"  # 'none', 'mean', 'sum'
-
-            # Specifies the amount of smoothing when computing the loss, where 0.0 means no smoothing.
-            # https://arxiv.org/abs/1512.00567
-            label_smoothing = 0.1
-
-            loss_fct = nn.CrossEntropyLoss(
-                reduction=reduction, label_smoothing=label_smoothing
-            )
-
-            shifted_logits_view = shifted_logits.view(-1, vocab_size)
-            labels_view = labels.view(-1)
-
-            # torch.Size([0, 30522]) torch.Size([30])
-            # print(shifted_logits_view.shape, labels_view.shape)
-
-            loss = loss_fct(shifted_logits_view, labels_view)
-
-            if reduction == "none":
-                loss = loss.view(outputs["logits"].size(0), -1).sum(1)
-
+        # if "input_ids" in batch:
+        #     # we are doing next-token prediction; shift prediction scores and input ids by one
+        #
+        #     if isinstance(model.get_base_model(), GitForCausalLM):
+        #         shifted_logits = logits[:, num_image_tokens:-1, :].contiguous()
+        #     else:
+        #         shifted_logits = logits[:, :-1, :].contiguous()
+        #
+        #     # print("shifted_logits", shifted_logits.shape)
+        #     labels = batch["input_ids"].clone()
+        #     # print("labels", labels.shape)
+        #     labels = labels[:, 1:].contiguous()
+        #     # print("labels contiguous", labels.shape)
+        #     # Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+        #     # 'none': no reduction will be applied, 'mean': the weighted mean of the
+        #     # output is taken, 'sum': the output will be summed.
+        #     reduction = "mean"  # 'none', 'mean', 'sum'
+        #
+        #     # Specifies the amount of smoothing when computing the loss, where 0.0 means no smoothing.
+        #     # https://arxiv.org/abs/1512.00567
+        #     label_smoothing = 0.1
+        #
+        #     loss_fct = nn.CrossEntropyLoss(
+        #         reduction=reduction, label_smoothing=label_smoothing
+        #     )
+        #
+        #     shifted_logits_view = shifted_logits.view(-1, vocab_size)
+        #     labels_view = labels.view(-1)
+        #
+        #     # torch.Size([0, 30522]) torch.Size([30])
+        #     # print(shifted_logits_view.shape, labels_view.shape)
+        #
+        #     loss = loss_fct(shifted_logits_view, labels_view)
+        #
+        #     if reduction == "none":
+        #         loss = loss.view(outputs["logits"].size(0), -1).sum(1)
+        #
         # feat = outputs["logits"]
         # target = input_ids.clone()
         # # need_predict = torch.tensor([[0] + [1] * len(target) + [1]])
@@ -713,83 +826,10 @@ def process_batch(batch, model, processor, accelerator, args):
     # print(
     #     f"loss {loss.size()} {loss.item()} {loss.item()/batch['pixel_values'].size(0)}"
     # )
-    return loss.mean()
+    return loss.mean(), logits
 
 
-def step_log(logs, lr_scheduler, optimizer, accelerator, args):
-    logs = {
-        "lr/lr": lr_scheduler.get_last_lr()[0],
-        # "lr/lr": args.learning_rate,
-        **logs,
-    }
-
-    if "d" in optimizer.param_groups[0]:
-        logs["lr/d*lr"] = (
-            # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
-            optimizer.param_groups[0].get("d")
-            * args.learning_rate
-        )
-
-    # Plot momentum
-    if args.lr_scheduler == "CyclicLR" or args.lr_scheduler == "OneCycleLR":
-        logs["momentum/betas1"] = optimizer.param_groups[0]["betas"][0]
-
-    return logs
-
-
-# def sample(example, model, processor, accelerator):
-@torch.no_grad()
-def evaluate(example, model, processor, metric, accelerator):
-    # We will use CLIPScore with the captions from the image and
-    # compare it with the CLIP score from the caption and the image
-
-    # - lets make a caption
-
-    # with accelerator.autocast():
-    #     inputs = processor(images=example["image_filename"],
-    #     return_tensors="pt").to(
-    #         accelerator.device
-    #     )
-    # pixel_values = inputs.pixel_values
-
-    with accelerator.autocast(), torch.inference_mode():
-        generated_ids = model.generate(
-            pixel_values=example["pixel_values"],
-            num_beams=3,
-            min_length=3,
-            max_length=75,
-        )
-        generated_captions = processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )
-
-        score = metric(
-            example["pixel_values"].clamp(0, 1),
-            generated_captions,
-        )
-        score.detach().item()
-
-        return score, generated_captions
-
-
-class LossRecorder:
-    def __init__(self):
-        self.loss_list: List[float] = []
-        self.loss_total: float = 0.0
-
-    def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0:
-            self.loss_list.append(loss)
-        else:
-            self.loss_total -= self.loss_list[step]
-            self.loss_list[step] = loss
-        self.loss_total += loss
-
-    @property
-    def moving_average(self) -> float:
-        return self.loss_total / len(self.loss_list)
-
-
+# @accelerate.find_executable_batch_size(starting_batch_size=args.batch_size)
 def train(
     batch_size,
     model,
@@ -799,6 +839,7 @@ def train(
     test_dataloader,
     args,
 ):
+    accuracy = evaluate.load("accuracy")
     # epochs = 5
     # save_every_n_epochs = 5
     # gradient_accumulation_steps = 2
@@ -811,7 +852,7 @@ def train(
     # frozen_parts = 1
     # caption_dropout = 0.1
 
-    print(model)
+    # print(model)
 
     # PEFT MODULE
     peft_module = "LoRA"
@@ -873,26 +914,6 @@ def train(
         "peft_config": {**clean_dict(peft_config.__dict__)},
     }
 
-    accelerator.init_trackers(
-        project_name=args.training_name, config=project_config
-    )
-
-    if args.log_with in ["wandb", "all"]:
-        wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
-        wandb_tracker.define_metric("current_step", hidden=True)
-        wandb_tracker.define_metric("epoch_step", hidden=True)
-        wandb_tracker.define_metric("validation_step", hidden=True)
-        wandb_tracker.define_metric("loss/current", step_metric="current_step")
-        wandb_tracker.define_metric(
-            "loss/validation_current", step_metric="validation_step"
-        )
-        wandb_tracker.define_metric(
-            "loss/validation_average", step_metric="epoch_step"
-        )
-        wandb_tracker.define_metric(
-            "loss/epoch_average", step_metric="epoch_step"
-        )
-
     print(f"train dataloader {len(train_dataloader)}  pre-accelerator")
     (
         model,
@@ -920,9 +941,32 @@ def train(
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
-    
-    if wandb is not None:
+    accelerator.init_trackers(
+        project_name=args.training_name,
+        config=project_config,
+        init_kwargs={"wandb": args.wandb_init_args},
+    )
+
+    if args.log_with in ["wandb", "all"]:
+        wandb_tracker = accelerator.get_tracker("wandb", unwrap=True)
+        wandb_tracker.define_metric("current_step", hidden=True)
+        wandb_tracker.define_metric("epoch_step", hidden=True)
+        wandb_tracker.define_metric("validation_step", hidden=True)
+        wandb_tracker.define_metric("loss/current", step_metric="current_step")
+        wandb_tracker.define_metric(
+            "loss/validation_current", step_metric="validation_step"
+        )
+        wandb_tracker.define_metric("wer_score", step_metric="validation_step")
+        wandb_tracker.define_metric(
+            "loss/validation_average", step_metric="epoch_step"
+        )
+        wandb_tracker.define_metric(
+            "loss/epoch_average", step_metric="epoch_step"
+        )
+        wandb_tracker.define_metric(
+            "wer_score_average", step_metric="epoch_step"
+        )
+
         # Magic
         wandb_tracker.watch(model, log_freq=100)
 
@@ -951,152 +995,171 @@ def train(
 
     loss_recorder = LossRecorder()
     val_loss_recorder = LossRecorder()
+    val_wer_recorder = LossRecorder()
 
-    # EPOCHS
-    for epoch in range(args.epochs):
-        accelerator.print(f"\nepoch {epoch+1}/{args.epochs}")
+    wer = evaluate.load("wer")
+    calc_metrics = calculate_metrics(wer, processor)
 
-        # BATCH
-        for step, batch in enumerate(train_dataloader):
-            with accelerator.accumulate(model):
-                optimizer.zero_grad()
-                loss = process_batch(
-                    batch, model, processor, accelerator, args
-                )
+    @accelerate.find_executable_batch_size(starting_batch_size=args.batch_size)
+    def inner_training_loop(batch_size):
+        nonlocal accelerator  # Ensure they can be used in our context
+        nonlocal global_step
+        accelerator.free_memory()  # Free all lingering references
 
-                accelerator.backward(loss)
+        # EPOCHS
+        for epoch in range(args.epochs):
+            accelerator.print(f"\nepoch {epoch+1}/{args.epochs}")
 
-                if (
-                    accelerator.sync_gradients
-                    and args.max_grad_norm is not None
-                    and args.max_grad_norm != 0.0
-                ):
-                    accelerator.clip_grad_norm_(
-                        model.parameters(), args.max_grad_norm
+            # BATCH
+            for step, batch in enumerate(train_dataloader):
+                with accelerator.accumulate(model):
+                    optimizer.zero_grad()
+                    loss, logits = process_batch(
+                        batch, model, processor, accelerator, args
                     )
 
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-                lr_scheduler.step()
+                    accelerator.backward(loss)
 
-                logs = {
-                    "current_step": step + (len(train_dataloader) * epoch),
-                    "loss/current": loss.detach().item(),
-                }
+                    if (
+                        accelerator.sync_gradients
+                        and args.max_grad_norm is not None
+                        and args.max_grad_norm != 0.0
+                    ):
+                        accelerator.clip_grad_norm_(
+                            model.parameters(), args.max_grad_norm
+                        )
 
-                accelerator.log(logs, step=global_step)
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
+                    lr_scheduler.step()
 
-                if accelerator.sync_gradients:
-                    progress_bar.update(1)
-                    global_step += 1
-                    current_loss = loss.detach().item()
-                    loss_recorder.add(
-                        epoch=epoch,
-                        step=int(step / args.gradient_accumulation_steps),
-                        loss=current_loss,
-                    )
                     logs = {
-                        "loss/average": loss_recorder.moving_average,
+                        "current_step": step + (len(train_dataloader) * epoch),
+                        "loss/current": loss.detach().item(),
                     }
-
-                    logs = step_log(
-                        logs, lr_scheduler, optimizer, accelerator, args
-                    )
 
                     accelerator.log(logs, step=global_step)
 
-                    postfix = {
-                        "avg_loss": loss_recorder.moving_average,
-                        "lr": lr_scheduler.get_last_lr()[0],
-                    }
+                    if accelerator.sync_gradients:
+                        progress_bar.update(1)
+                        global_step += 1
+                        current_loss = loss.detach().item()
+                        loss_recorder.add(
+                            epoch=epoch,
+                            step=int(step / args.gradient_accumulation_steps),
+                            loss=current_loss,
+                        )
+                        logs = {
+                            "loss/average": loss_recorder.moving_average,
+                        }
 
-                    if "d" in optimizer.param_groups[0]:
-                        postfix["d*lr"] = (
-                            optimizer.param_groups[0].get("d")
-                            * lr_scheduler.get_last_lr()[0]
+                        logs = step_log(
+                            logs, lr_scheduler, optimizer, accelerator, args
                         )
 
-                    progress_bar.set_postfix(postfix)
+                        accelerator.log(logs, step=global_step)
 
-        accelerator.wait_for_everyone()
+                        postfix = {
+                            "avg_loss": loss_recorder.moving_average,
+                            "lr": lr_scheduler.get_last_lr()[0],
+                        }
 
-        # VALIDATION
-        # ----------
+                        if "d" in optimizer.param_groups[0]:
+                            postfix["d*lr"] = (
+                                optimizer.param_groups[0].get("d")
+                                * lr_scheduler.get_last_lr()[0]
+                            )
 
-        val_progress_bar = tqdm(
-            range(len(val_dataloader)),
-            smoothing=0,
-            disable=not accelerator.is_local_main_process,
-            desc="validation steps",
-        )
-        v_dataloader = val_dataloader
-        with torch.no_grad():
-            for val_step, batch in enumerate(v_dataloader):
-                val_progress_bar.update(1)
-                loss = process_batch(
-                    batch, model, processor, accelerator, args
-                )
+                        progress_bar.set_postfix(postfix)
 
-                current_loss = loss.detach().item()
-
-                val_loss_recorder.add(
-                    epoch=epoch, step=val_step, loss=current_loss
-                )
-
-                accelerator.log(
-                    {
-                        "validation_step": val_step
-                        + (len(v_dataloader) * epoch),
-                        "loss/validation_current": current_loss,
-                    },
-                    step=global_step,
-                )
-
-        print(f"Validation avg loss {val_loss_recorder.moving_average}")
-
-        loggable = {
-            "epoch_step": epoch + 1,
-            "loss/validation_average": val_loss_recorder.moving_average,
-        }
-
-        accelerator.log(loggable, step=global_step)
-
-        # load image
-        for i, val in enumerate(val_dataloader):
-            if i >= args.validation_samples or 5:
-                break
-            sample(val, model, processor, accelerator)
-
-        # Save every n epochs
-        if (
-            args.save_every_n_epochs != 0
-            and args.save_every_n_epochs % (epoch + 1) == 0
-        ):
             accelerator.wait_for_everyone()
-            save_epoch_to = f"{save_to}_{epoch+1}"
-            print(f"Saved to {save_epoch_to}")
-            model.save_pretrained(save_epoch_to, safe_serialization=True)
 
-        loggable = {
-            "epoch_step": epoch + 1,
-            "loss/epoch_average": loss_recorder.moving_average,
-        }
+            # VALIDATION
+            # ----------
 
-        accelerator.log(loggable, step=global_step)
+            val_progress_bar = tqdm(
+                range(len(val_dataloader)),
+                smoothing=0,
+                disable=not accelerator.is_local_main_process,
+                desc="validation steps",
+            )
+            v_dataloader = val_dataloader
+            with torch.no_grad():
+                for val_step, batch in enumerate(v_dataloader):
+                    val_progress_bar.update(1)
+                    loss, logits = process_batch(
+                        batch, model, processor, accelerator, args
+                    )
+
+                    current_loss = loss.detach().item()
+
+                    metrics = calc_metrics((logits, batch["input_ids"]))
+
+                    val_loss_recorder.add(
+                        epoch=epoch, step=val_step, loss=current_loss
+                    )
+                    val_wer_recorder.add(
+                        epoch=epoch, step=val_step, loss=metrics["wer_score"]
+                    )
+
+                    accelerator.log(
+                        {
+                            "validation_step": val_step
+                            + (len(v_dataloader) * epoch),
+                            "loss/validation_current": current_loss,
+                            "wer_score": metrics["wer_score"],
+                        },
+                        step=global_step,
+                    )
+
+            print(f"Validation avg loss {val_loss_recorder.moving_average}")
+
+            loggable = {
+                "epoch_step": epoch + 1,
+                "loss/validation_average": val_loss_recorder.moving_average,
+                "wer_score_average": val_wer_recorder.moving_average,
+            }
+
+            accelerator.log(loggable, step=global_step)
+
+            # load image
+            for i, val in enumerate(val_dataloader):
+                if i >= args.validation_samples or 5:
+                    break
+                sample(val, model, processor, accelerator)
+
+            # Save every n epochs
+            if (
+                args.save_every_n_epochs != 0
+                and args.save_every_n_epochs % (epoch + 1) == 0
+            ):
+                accelerator.wait_for_everyone()
+                save_epoch_to = f"{save_to}_{epoch+1}"
+                print(f"Saved to {save_epoch_to}")
+                model.save_pretrained(save_epoch_to, safe_serialization=True)
+
+            loggable = {
+                "epoch_step": epoch + 1,
+                "loss/epoch_average": loss_recorder.moving_average,
+            }
+
+            accelerator.log(loggable, step=global_step)
+
+    inner_training_loop()
 
     accelerator.free_memory()
 
     metric = CLIPScore(model_name_or_path="openai/clip-vit-base-patch16")
     metric.to(accelerator.device)
-
+    get_clip_score = clip_score(model, processor, metric, accelerator)
     scores = []
     for step, example in enumerate(test_dataloader):
-        score, caption = evaluate(
-            example, model, processor, metric, accelerator
-        )
+        score, caption = get_clip_score(example)
+
         print(f"score: {score} - {caption}")
         scores.append((score, example["pixel_values"], caption))
 
+    clip_score_average = sum([score[0] for score in scores]) / len(scores)
     print(
         f"average CLIP score {sum([score[0] for score in scores])/len(scores)}"
     )
@@ -1120,10 +1183,7 @@ def train(
         ]
         accelerator.log({"clip_scores": tbl}, step=global_step)
         accelerator.log(
-            {
-                "average_clip_score": sum([score[0] for score in scores])
-                / len(scores)
-            },
+            {"clip_score_average": clip_score_average},
             step=global_step,
         )
 
@@ -1141,9 +1201,7 @@ def train(
 
 def main(args):
     print(args)
-    seed = args.seed or 42
-    torch.manual_seed(seed)
-    random.seed(seed)
+    set_seed(args.seed)
 
     args.training_start = gmtime()
 
