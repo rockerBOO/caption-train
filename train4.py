@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union, List
 from accelerate import Accelerator
+from tqdm import tqdm
 
 import torch
 import torch.optim as optim
@@ -13,6 +14,24 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForVision2Seq, AutoProcessor
 
 from caption_train.captions import shuffle_caption
+
+
+class LossRecorder:
+    def __init__(self):
+        self.loss_list: List[float] = []
+        self.loss_total: float = 0.0
+
+    def add(self, *, epoch: int, step: int, loss: float) -> None:
+        if epoch == 0:
+            self.loss_list.append(loss)
+        else:
+            self.loss_total -= self.loss_list[step]
+            self.loss_list[step] = loss
+        self.loss_total += loss
+
+    @property
+    def moving_average(self) -> float:
+        return self.loss_total / len(self.loss_list)
 
 
 class ImageCaptioningDataset(Dataset):
@@ -81,6 +100,9 @@ def collator(processor, device):
                     padding=True,
                     return_tensors="pt",
                 )
+                processed_batch["text"] = [
+                    example["text"] for example in batch
+                ]
                 processed_batch["input_ids"] = text_inputs["input_ids"]
                 processed_batch["attention_mask"] = text_inputs[
                     "attention_mask"
@@ -115,16 +137,56 @@ class TrainingConfig:
 
 
 def training_config_args(argparser):
-    argparser.add_argument("--rank", type=int, required=True)
-    argparser.add_argument("--alpha", type=float, required=True)
-    argparser.add_argument("--dropout", type=float, default=0.05)
     argparser.add_argument(
-        "--target_modules", nargs="+", type=list, default=BLIP_TARGET_MODULES
+        "--rank",
+        type=int,
+        default=16,
+        help="Rank/dim for the LoRA. Default: 16",
     )
-    argparser.add_argument("--learning_rate", type=float, default=1e-3)
-    argparser.add_argument("--weight_decay", type=float, default=1e-4)
-    argparser.add_argument("--batch_size", type=int, default=2)
-    argparser.add_argument("--epochs", type=int, default=5)
+    argparser.add_argument(
+        "--alpha",
+        type=float,
+        default=32,
+        help="Alpha for scaling the LoRA weights. Default: 32",
+    )
+    argparser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.05,
+        help="Dropout for the LoRA network. Default: 0.05",
+    )
+    
+    argparser.add_argument(
+        "--target_modules",
+        nargs="+",
+        type=list,
+        default=BLIP_TARGET_MODULES,
+        help=f"Target modules to be trained. Consider Linear and Conv2D modules in the base model. Default: {' '.join(BLIP_TARGET_MODULES)}",
+    )
+    argparser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for the LoRA. Default: 1e-3",
+    )
+    argparser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay for the AdamW optimizer. Default: 1e-4",
+    )
+    argparser.add_argument(
+        "--batch_size",
+        type=int,
+        default=2,
+        help="Batch size for the image/caption pairs. Default: 2",
+    )
+    argparser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Number of epochs to run. Default: 5",
+    )
 
     return argparser
 
@@ -153,36 +215,57 @@ class Trainer:
         return outputs
 
     def train(self):
+        loss_recorder = LossRecorder()
+
+        step = 0
+
         for epoch in range(self.config.epochs):
             print("Epoch:", epoch)
-            for idx, batch in enumerate(self.datasets.train_dataloader):
+            progress = tqdm(
+                enumerate(self.datasets.train_dataloader),
+                total=len(self.datasets.train_dataloader),
+            )
+            for idx, batch in progress:
+                step += 1
                 self.optimizer.zero_grad()
 
                 outputs = self.process_batch(batch)
 
                 loss = outputs.loss
 
-                print("Loss:", loss.item())
+                loss_recorder.add(
+                    epoch=epoch,
+                    step=idx,
+                    loss=loss.item(),
+                )
+
+                progress.set_postfix({"loss": loss_recorder.moving_average})
+                # print("Loss:", loss.item())
 
                 loss.backward()
 
                 self.optimizer.step()
 
-                if idx % 10 == 0:
+                if idx % (len(self.datasets.train_dataloader) // 5) == 0:
                     generated_output = self.model.generate(
                         pixel_values=batch.pop("pixel_values").to(
                             self.model.device
                         ),
                         max_new_tokens=64,
                     )
-                    print(
-                        self.processor.batch_decode(
-                            generated_output, skip_special_tokens=True
-                        )
+                    decoded = self.processor.batch_decode(
+                        generated_output, skip_special_tokens=True
                     )
 
+                    text = batch.pop("text")
+
+                    for gen, cap in zip(decoded, text):
+                        print(f"Gen: {gen}")
+                        print(f"Cap: {cap}")
+
+        print(f"Saved to {self.config.output_dir}")
         # hugging face models saved to the directory
-        self.model.save_pretrained("./training/caption")
+        self.model.save_pretrained(args.output_dir)
 
 
 # Set the model as ready for training, makes sure the gradient are on
@@ -247,6 +330,9 @@ def setup_datasets(
                     padding=True,
                     return_tensors="pt",
                 )
+                processed_batch["text"] = [
+                    example["text"] for example in batch
+                ]
                 processed_batch["input_ids"] = text_inputs["input_ids"]
                 processed_batch["attention_mask"] = text_inputs[
                     "attention_mask"
@@ -336,15 +422,25 @@ if __name__ == "__main__":
     Example: a.png a.txt
 
     Creates a datasets compatible metadata.jsonl from those pairings.
-    """
-    )
-    argparser.add_argument("dataset_dir")
-    argparser.add_argument("output_dir")
-    argparser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    """,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     argparser.add_argument(
-        "--model_id", default="Salesforce/blip-image-captioning-base"
+        "dataset_dir",
+        help="Dataset directory with the metadata.jsonl file and images",
+    )
+    argparser.add_argument(
+        "output_dir", help="Save the LoRA files to this directory"
+    )
+    argparser.add_argument(
+        "--device",
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to run the training on. Default: cuda or cpu",
+    )
+    argparser.add_argument(
+        "--model_id",
+        default="Salesforce/blip-image-captioning-base",
+        help="Model to train on. Salesforce/blip-image-captioning-base or Salesforce/blip-image-captioning-large. Default: Salesforce/blip-image-captioning-base",
     )
 
     argparser = training_config_args(argparser)

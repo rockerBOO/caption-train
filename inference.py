@@ -10,6 +10,7 @@ from peft import PeftModel
 from pathlib import Path
 import csv
 from accelerate import Accelerator
+from accelerate.utils import set_seed
 from datasets import load_dataset
 import torch
 # from itertools import batched
@@ -17,6 +18,10 @@ import torch
 
 @torch.no_grad()
 def main(args):
+    if args.seed:
+        print(f"Using seed {args.seed}")
+        set_seed(args.seed)
+
     processor = AutoProcessor.from_pretrained(
         "Salesforce/blip-image-captioning-base"
     )
@@ -31,15 +36,21 @@ def main(args):
 
     model.eval()
 
-    images = sum(
-        [
-            glob.glob(str(Path(args.images_dir).absolute()) + f"/*.{f}")
-            for f in ["jpg", "jpeg", "png", "webp", "avif", "bmp"]
-        ],
-        [],
-    )
+    images_path = Path(args.images)
 
-    print(f"{len(images)} images")
+    if images_path.is_dir():
+        images = sum(
+            [
+                glob.glob(str(images_path.absolute()) + f"/*.{f}")
+                for f in ["jpg", "jpeg", "png", "webp", "avif", "bmp"]
+            ],
+            [],
+        )
+
+        print(f"{len(images)} images")
+    else:
+        images = [images_path]
+        print(f"{len(images)} images")
 
     results = []
     images.sort()
@@ -106,10 +117,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--images_dir",
+        "--images",
         type=str,
         required=True,
-        help="Directory of images to caption",
+        help="Directory of images or image file to caption",
     )
 
     parser.add_argument(
@@ -117,6 +128,8 @@ if __name__ == "__main__":
         default=3,
         help="Save captions to the images next to the image",
     )
+
+    parser.add_argument("--seed", type=int, help="Seed")
 
     parser.add_argument(
         "--save_captions",

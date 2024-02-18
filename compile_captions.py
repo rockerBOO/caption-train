@@ -8,7 +8,9 @@ from datasets import load_dataset
 
 def main(args):
     dataset_dir = Path(args.dataset_dir)
-    output = Path(args.output_dir) if args.output_dir is not None else dataset_dir
+    output = (
+        Path(args.output_dir) if args.output_dir is not None else dataset_dir
+    )
     captions = load_captions(dataset_dir, captions=[], true_dir=output)
 
     if len(captions) == 0:
@@ -44,7 +46,8 @@ if __name__ == "__main__":
 
         # Output metadata.jsonl to a different location
         python compile_captions.py /path/to/captions/dir /path/to/output_dir
-        """
+        """,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
 
     arg_parser.add_argument("dataset_dir")
