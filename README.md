@@ -170,6 +170,10 @@ poetry run python inference.py \
 
 ## Development
 
+Poetry for dependencies.
+Ruff for linting and formatting.
+Pytest for testing.
+
 ### Test
 
 ```bash
