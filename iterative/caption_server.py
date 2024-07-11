@@ -1,4 +1,4 @@
 from server import run, SubHTTPServer, ServerHandler
 
-dir = "/home/rockerboo/code/detect_text/out/metart"
+dir = "~/art/images"
 run(dir, SubHTTPServer, ServerHandler)
