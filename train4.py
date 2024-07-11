@@ -155,7 +155,7 @@ def training_config_args(argparser):
         default=0.05,
         help="Dropout for the LoRA network. Default: 0.05",
     )
-    
+
     argparser.add_argument(
         "--target_modules",
         nargs="+",
@@ -271,7 +271,7 @@ class Trainer:
 # Set the model as ready for training, makes sure the gradient are on
 
 
-def setup_model(model_id, training_config, device):
+def set_up_model(model_id, training_config, device):
     config = LoraConfig(
         r=training_config.rank,
         lora_alpha=training_config.alpha,
@@ -297,7 +297,7 @@ def setup_model(model_id, training_config, device):
     return model, processor
 
 
-def setup_datasets(
+def set_up_datasets(
     dataset_dir: Path,
     processor: AutoProcessor,
     training_config: TrainingConfig,
@@ -378,9 +378,11 @@ def main(args):
         output_dir=args.output_dir,
     )
 
-    model, processor = setup_model(args.model_id, training_config, args.device)
+    model, processor = set_up_model(
+        args.model_id, training_config, args.device
+    )
 
-    datasets = setup_datasets(
+    datasets = set_up_datasets(
         args.dataset_dir, processor, training_config, args.device
     )
 

@@ -1,6 +1,7 @@
 import argparse
 import glob
 
+import pillow_avif
 from PIL import Image
 from transformers import (
     AutoProcessor,
@@ -30,7 +31,8 @@ def main(args):
     accelerator = Accelerator()
     device = accelerator.device
 
-    model = PeftModel.from_pretrained(model, args.peft_model)
+    if args.peft_model:
+        model = PeftModel.from_pretrained(model, args.peft_model)
 
     model, processor = accelerator.prepare(model, processor)
 
@@ -92,11 +94,15 @@ def main(args):
         for result in results:
             img = Path(result["img"])
 
-            with open(
-                img.with_name(img.stem + args.caption_extension),
-                "w",
-                encoding="utf-8",
-            ) as f:
+            caption_file = img.with_name(img.stem + args.caption_extension)
+
+            if caption_file.is_file():
+                print(f"Caption already exists for {str(caption_file)}")
+                if args.overwrite is False:
+                    print(result["caption"])
+                    continue
+
+            with open(caption_file, "w", encoding="utf-8") as f:
                 f.write(result["caption"])
 
 
@@ -135,6 +141,10 @@ if __name__ == "__main__":
         "--save_captions",
         action="store_true",
         help="Save captions to the images next to the image",
+    )
+
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite captions"
     )
 
     parser.add_argument(
