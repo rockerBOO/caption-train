@@ -8,13 +8,14 @@
     - [Dependencies](#dependencies)
   - [Usage](#usage)
     - [Setup dataset from text/image pairs](#setup-dataset-from-textimage-pairs)
-    - [Run training](#run-training)
-    - [Inference](#inference)
-      - [Example usage](#example-usage)
-  - [Florence](#florence)
-    - [Example training](#example-training)
-  - [Florence Inference](#florence-inference)
-  - [Example script](#example-script)
+    - [Run BLIP training](#run-blip-training)
+    - [BLIP LoRA Inference](#blip-lora-inference)
+      - [Example BLIP LoRA usage bash script](#example-blip-lora-usage-bash-script)
+  - [Florence 2](#florence-2)
+    - [Example Florence 2 training](#example-florence-2-training)
+  - [Florence 2 Inference](#florence-2-inference)
+  - [Florence 2 inference example](#florence-2-inference-example)
+  - [Example Florence 2 bash script](#example-florence-2-bash-script)
   - [Development](#development)
     - [Test](#test)
 <!--toc:end-->
@@ -24,6 +25,7 @@ Train captioning models (image to text) using hugging face compatible models (mo
 ## Support
 
 - BLIP
+- Florence 2
 
 ## Install
 
@@ -86,7 +88,7 @@ options:
 $ python compile_captions.py /path/to/captions/dir /path/to/output_dir
 ```
 
-### Run training
+### Run BLIP training
 
 ```bash
 $ python train4.py --help
@@ -130,7 +132,7 @@ options:
   --epochs EPOCHS       Number of epochs to run. Default: 5
 ```
 
-### Inference
+### BLIP LoRA Inference
 
 ```bash
 $ python inference.py --help
@@ -152,7 +154,7 @@ options:
                         Maximum number of tokens to generate
 ```
 
-#### Example usage
+#### Example BLIP LoRA usage bash script
 
 ```bash
 input="/path/to/images/to/caption"
@@ -227,7 +229,7 @@ python train_florence.py --dataset_dir /path/to/image-text-pairs --output_dir lo
 
 ```
 
-## Florence Inference
+## Florence 2 Inference
 
 
 ```
@@ -285,6 +287,7 @@ python inference_florence.py \
 	--base_model=$base_model \
 	--images $input \
 	--peft_model $lora_model \
+    # --save_captions
 ```
 
 ## Development
