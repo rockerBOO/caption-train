@@ -1,4 +1,4 @@
-# Caption Trainer
+# Caption trainer
 
 <!--toc:start-->
 - [Caption Trainer](#caption-trainer)
@@ -20,7 +20,7 @@
     - [Test](#test)
 <!--toc:end-->
 
-Train IQA for captioning using 🤗 compatible models (models that use text+image pairs and produces text).
+Train IQA for captioning using 🤗 compatible models.
 
 ## Support
 
@@ -41,21 +41,27 @@ source venv/bin/activate # venv\Scripts\activate.bat on windows
 
 ### Dependencies
 
-With the `venv` activated.
+With the `venv` activated. Each of these need to be done *in-order*.
 
-```
+_NOTE_ You will also need [PyTorch](https://pytorch.org/get-started/locally/) for your hardware.
+
+```bash
+# Some missing packages for building our application
+pip install -r requirements_missing.txt
+# Install your own torch requirements but you will need torch, torchvision
+pip install -r requirements_torch.txt
+# Now we can install our main requirements
 pip install -r requirements.txt
 ```
 
-Or with Poetry.
+<!-- Or with Poetry. -->
+<!---->
+<!-- ```bash -->
+<!-- poetry install -->
+<!-- ``` -->
 
-```bash
-poetry install
-```
+<!-- Additional [Poetry install instructions](https://python-poetry.org/docs/#installation). -->
 
-Additional [Poetry install instructions](https://python-poetry.org/docs/#installation).
-
-_NOTE_ You will also need [PyTorch](https://pytorch.org/get-started/locally/) for your hardware.
 
 ## Usage
 
@@ -258,11 +264,15 @@ options:
 
 ## Florence 2 training
 
+Train a Florence 2 LoRA on your dataset.
+
 ```bash
 accelerate launch train_florence_lora.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
 ```
 
 ## Florence 2 inference
+
+Inference on your Florence 2 LoRA model.
 
 ```
 $ python inference_florence.py --help
@@ -296,7 +306,7 @@ options:
 
 ## Florence 2 inference example
 
-Inference example
+Inference example for Florence 2. Works with PEFT generated models.
 
 ```bash
 $ accelerate launch inference.py --images /path/to/images/ --peft_model models/my_lora
@@ -307,13 +317,11 @@ $ accelerate launch inference.py --images /path/to/images/ --peft_model models/m
 ```bash
 input="/path/to/images/to/caption"
 lora_model="training/review/2024-02-13-232352-15f12fb9-e20-l-2.87"
-base_model="microsoft/Florence-2-base-ft"
 
 echo "Input: $input"
 echo "LoRA Model: $lora_model"
 
 python inference_florence.py \
-	--base_model=$base_model \
 	--images $input \
 	--peft_model $lora_model \
     # --save_captions

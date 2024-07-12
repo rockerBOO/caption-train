@@ -92,8 +92,8 @@ def main(args):
             if caption_file.is_file():
                 if args.overwrite is False:
                     # print(f"Caption already exists for {str(caption_file)}")
-                    with open(caption_file, "r") as r:
-                        print(r.read())
+                    # with open(caption_file, "r") as r:
+                    #     print(r.read())
                     continue
 
             with open(caption_file, "w", encoding="utf-8") as f:
