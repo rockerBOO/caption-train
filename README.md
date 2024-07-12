@@ -8,24 +8,25 @@
     - [Dependencies](#dependencies)
   - [Usage](#usage)
     - [Setup dataset from text/image pairs](#setup-dataset-from-textimage-pairs)
-    - [Run BLIP training](#run-blip-training)
-    - [BLIP LoRA Inference](#blip-lora-inference)
-      - [Example BLIP LoRA usage bash script](#example-blip-lora-usage-bash-script)
+  - [Run BLIP training](#run-blip-training)
+  - [BLIP LoRA inference](#blip-lora-inference)
+  - [Example BLIP LoRA usage bash script](#example-blip-lora-usage-bash-script)
   - [Florence 2](#florence-2)
-    - [Example Florence 2 training](#example-florence-2-training)
-  - [Florence 2 Inference](#florence-2-inference)
+  - [Florence 2 training](#florence-2-training)
+  - [Florence 2 inference](#florence-2-inference)
   - [Florence 2 inference example](#florence-2-inference-example)
   - [Example Florence 2 bash script](#example-florence-2-bash-script)
   - [Development](#development)
     - [Test](#test)
 <!--toc:end-->
 
-Train captioning models (image to text) using hugging face compatible models (models that use text+image pairs and produces text).
+Train IQA for captioning using 🤗 compatible models (models that use text+image pairs and produces text).
 
 ## Support
 
 - BLIP
-- Florence 2
+- [Florence 2](#florence-2)
+- WIP Moondream 2
 
 ## Install
 
@@ -54,10 +55,22 @@ poetry install
 
 Additional [Poetry install instructions](https://python-poetry.org/docs/#installation).
 
-
-*NOTE* You will also need [PyTorch](https://pytorch.org/get-started/locally/) for your hardware.
+_NOTE_ You will also need [PyTorch](https://pytorch.org/get-started/locally/) for your hardware.
 
 ## Usage
+
+We need to make sure your images have a compatible dataset. We have a script to convert over image/text captioned file pairs.
+
+Convert:
+
+- images/img1.jpg
+- images/img1.txt
+
+To a `metadata.jsonl` using `compile_captions.py` which is compatible with 🤗Datasets.
+
+- Find the appropriate model you want to train a LoRA on, BLIP, Florence 2, Moondream 2.
+- Then we can train on that dataset.
+- Also have inference scripts for each model.
 
 ### Setup dataset from text/image pairs
 
@@ -88,7 +101,7 @@ options:
 $ python compile_captions.py /path/to/captions/dir /path/to/output_dir
 ```
 
-### Run BLIP training
+## Run BLIP training
 
 ```
 $ accelerate launch train_blip_network.py --help
@@ -132,7 +145,7 @@ options:
   --epochs EPOCHS       Number of epochs to run. Default: 5
 ```
 
-### BLIP LoRA Inference
+## BLIP LoRA inference
 
 ```
 $ python inference.py --help
@@ -154,7 +167,7 @@ options:
                         Maximum number of tokens to generate
 ```
 
-#### Example BLIP LoRA usage bash script
+## Example BLIP LoRA usage bash script
 
 ```bash
 input="/path/to/images/to/caption"
@@ -178,25 +191,16 @@ accelerate launch inference.py \
 Training of LoRA for Florence 2 base and large.
 
 ```
-$ python train_florence.py --help
-usage: train_florence.py [-h] [--dataset_dir DATASET_DIR] [--output_dir OUTPUT_DIR] [--device DEVICE] [--model_id MODEL_ID] [--rank RANK]
-                         [--alpha ALPHA] [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]]
-                         [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY] [--batch_size BATCH_SIZE]
-                         [--gradient_accumulation_steps GRADIENT_ACCUMULATION_STEPS] [--epochs EPOCHS]
+$ python train_florence_lora.py --help
+usage: train_florence_lora.py [-h] [--dataset_dir DATASET_DIR] [--output_dir OUTPUT_DIR] [--device DEVICE] [--model_id MODEL_ID] [--seed SEED] [--log_with {all,wandb,tensorboard}] [--name NAME] [--rank RANK] [--alpha ALPHA]
+                              [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]] [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY] [--batch_size BATCH_SIZE]
+                              [--gradient_accumulation_steps GRADIENT_ACCUMULATION_STEPS] [--epochs EPOCHS] [--gradient_checkpointing] [--quantize] [--accumulation_compression] [--rslora]
+                              [--sample_every_n_epochs SAMPLE_EVERY_N_EPOCHS] [--sample_every_n_steps SAMPLE_EVERY_N_STEPS] [--save_every_n_epochs SAVE_EVERY_N_EPOCHS] [--save_every_n_steps SAVE_EVERY_N_STEPS]
+                              [--optimizer_name {AdamW,AdamW8bit,Flora}] [--scheduler {OneCycle}] [--accumulation_rank ACCUMULATION_RANK] [-ac] [--accumulation-rank ACCUMULATION_RANK] [--optimizer_rank OPTIMIZER_RANK]
 
-    Caption trainer for Florence
+        Florence 2 trainer
 
-    Designed to be used with Hugging Face datasets.
 
-    ---
-
-    Use compile_captions.py to create a compatible dataset from
-    image/text pairing.
-
-    Example: a.png a.txt
-
-    Creates a datasets compatible metadata.jsonl from those pairings.
-    
 
 options:
   -h, --help            show this help message and exit
@@ -206,6 +210,10 @@ options:
                         Save the LoRA files to this directory
   --device DEVICE       Device to run the training on. Default: cuda or cpu
   --model_id MODEL_ID   Model to train on. microsoft/Florence-2-base-ft or microsoft/Florence-2-large-ft. Default: microsoft/Florence-2-base-ft
+  --seed SEED           Seed used for random numbers
+  --log_with {all,wandb,tensorboard}
+                        Log with. all, wandb, tensorboard
+  --name NAME           Name to be used with saving and logging
   --rank RANK           Rank/dim for the LoRA. Default: 16
   --alpha ALPHA         Alpha for scaling the LoRA weights. Default: 32
   --dropout DROPOUT     Dropout for the LoRA network. Default: 0.05
@@ -220,16 +228,41 @@ options:
   --gradient_accumulation_steps GRADIENT_ACCUMULATION_STEPS
                         Number of updates steps to accumulate before performing a backward/update pass.
   --epochs EPOCHS       Number of epochs to run. Default: 5
+  --gradient_checkpointing
+                        Gradient checkpointing to reduce memory usage in exchange for slower training
+  --quantize            Quantize the training model to 4-bit
+  --accumulation_compression
+                        Accumulation compression for FloraAccelerator
+  --rslora              RS LoRA scales alpha to size of rank
+  --sample_every_n_epochs SAMPLE_EVERY_N_EPOCHS
+                        Sample the dataset every n epochs
+  --sample_every_n_steps SAMPLE_EVERY_N_STEPS
+                        Sample the dataset every n steps
+  --save_every_n_epochs SAVE_EVERY_N_EPOCHS
+                        Save the model every n epochs
+  --save_every_n_steps SAVE_EVERY_N_STEPS
+                        Save the model every n steps
+  --optimizer_name {AdamW,AdamW8bit,Flora}
+                        Optimizer to use
+  --scheduler {OneCycle}
+                        Scheduler to use
+  --accumulation_rank ACCUMULATION_RANK
+                        Rank to use with FloraAccelerator for low rank optimizer
+  -ac, --activation_checkpointing
+                        Activation checkpointing using the FloraAccelerator
+  --accumulation-rank ACCUMULATION_RANK
+                        Accumulation rank for low rank accumulation
+  --optimizer_rank OPTIMIZER_RANK
+                        Flora optimizer rank for low-rank optimizer
 ```
 
-### Example Florence 2 training
+## Florence 2 training
 
 ```bash
-accelerate launch train_florence.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
+accelerate launch train_florence_lora.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
 ```
 
-## Florence 2 Inference
-
+## Florence 2 inference
 
 ```
 $ python inference_florence.py --help
@@ -241,7 +274,7 @@ usage: inference_florence.py [-h]
         Train a LoRA on a Florence model for image captioning.
 
         $ python inference.py --images /path/to/images/ --peft_model models/my_lora
-        
+
 
 options:
   -h, --help            show this help message and exit
@@ -261,7 +294,6 @@ options:
                         Maximum number of tokens to generate
 ```
 
-
 ## Florence 2 inference example
 
 Inference example
@@ -271,7 +303,6 @@ $ accelerate launch inference.py --images /path/to/images/ --peft_model models/m
 ```
 
 ## Example Florence 2 bash script
-
 
 ```bash
 input="/path/to/images/to/caption"
@@ -296,7 +327,7 @@ Pytest for testing.
 
 ### Test
 
-```bash
+```
 $ pytest
 ============================= test session starts ==============================
 platform linux -- Python 3.11.5, pytest-7.4.3, pluggy-1.3.0
