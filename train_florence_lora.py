@@ -1,21 +1,30 @@
 import argparse
+import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union, List
-from accelerate import Accelerator
-from tqdm import tqdm
+from typing import List, Optional
 
 import torch
-import torch.optim as optim
-from datasets import Dataset as HFDataset
+from accelerate import Accelerator
 from datasets import DatasetDict, load_dataset
 from peft import LoraConfig, get_peft_model
-from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForCausalLM, AutoProcessor
 
-import flora_opt
+# from peft import prepare_model_for_kbit_training
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoProcessor
+from transformers import BitsAndBytesConfig
+
 
 from caption_train.captions import shuffle_caption
+from caption_train.opt import (
+    get_accelerator,
+    get_optimizer,
+    get_scheduler,
+    opt_config_args,
+)
+from caption_train.util import LossRecorder
+# from caption_train.util import print_gpu_utilization
 
 
 def training_config_args(argparser):
@@ -37,7 +46,6 @@ def training_config_args(argparser):
         default=0.05,
         help="Dropout for the LoRA network. Default: 0.05",
     )
-
     argparser.add_argument(
         "--target_modules",
         nargs="+",
@@ -76,40 +84,47 @@ def training_config_args(argparser):
         help="Number of epochs to run. Default: 5",
     )
     argparser.add_argument(
-        "-ac",
-        "--activation_checkpointing",
+        "--gradient_checkpointing",
         action="store_true",
+        help="Gradient checkpointing to reduce memory usage in exchange for slower training",
     )
     argparser.add_argument(
-        "--accumulation_rank",
-        type=int,
-        default=None,
+        "--quantize",
+        action="store_true",
+        help="Quantize the training model to 4-bit",
     )
     argparser.add_argument(
-        "--optimizer_rank",
+        "--accumulation_compression",
+        action="store_true",
+        help="Accumulation compression for FloraAccelerator",
+    )
+    argparser.add_argument(
+        "--rslora",
+        action="store_true",
+        help="RS LoRA scales alpha to size of rank",
+    )
+    argparser.add_argument(
+        "--sample_every_n_epochs",
         type=int,
-        default=None,
+        help="Sample the dataset every n epochs",
+    )
+    argparser.add_argument(
+        "--sample_every_n_steps",
+        type=int,
+        help="Sample the dataset every n steps",
+    )
+    argparser.add_argument(
+        "--save_every_n_epochs",
+        type=int,
+        help="Save the model every n epochs",
+    )
+    argparser.add_argument(
+        "--save_every_n_steps",
+        type=int,
+        help="Save the model every n steps",
     )
 
     return argparser
-
-
-class LossRecorder:
-    def __init__(self):
-        self.loss_list: List[float] = []
-        self.loss_total: float = 0.0
-
-    def add(self, *, epoch: int, step: int, loss: float) -> None:
-        if epoch == 0:
-            self.loss_list.append(loss)
-        else:
-            self.loss_total -= self.loss_list[step]
-            self.loss_list[step] = loss
-        self.loss_total += loss
-
-    @property
-    def moving_average(self) -> float:
-        return self.loss_total / len(self.loss_list)
 
 
 IGNORE_ID = -100  # Pytorch ignore index when computing loss
@@ -125,6 +140,7 @@ class ImageCaptioningDataset(Dataset):
         caption_dropout=0.0,
         frozen_parts=0,
         shuffle_captions=False,
+        task="<DETAILED_CAPTION>",
     ):
         self.dataset = dataset
         self.processor = processor
@@ -132,7 +148,7 @@ class ImageCaptioningDataset(Dataset):
         self.caption_dropout = caption_dropout
         self.frozen_parts = frozen_parts
         self.transform = transform
-        self.task = "<DETAILED_CAPTION>"
+        self.task = task
 
     def __len__(self):
         return len(self.dataset)
@@ -164,11 +180,9 @@ class ImageCaptioningDataset(Dataset):
         labels = self.processor.tokenizer(
             text,
             return_tensors="pt",
-            # padding="longest",
-            # padding=True,
             padding="max_length",
             max_length=MAX_LENGTH,
-            return_token_type_ids=False,  # no need to set this to True since BART does not use token type ids
+            return_token_type_ids=False,
         )["input_ids"]
 
         labels[labels == self.processor.tokenizer.pad_token_id] = (
@@ -183,7 +197,7 @@ class ImageCaptioningDataset(Dataset):
 
 @dataclass
 class Datasets:
-    dataset: Union[HFDataset, DatasetDict]
+    dataset: DatasetDict
     train_dataset: ImageCaptioningDataset
     train_dataloader: DataLoader
 
@@ -202,6 +216,13 @@ class TrainingConfig:
     batch_size: int
     epochs: int
     output_dir: str
+    rslora: bool
+    optimizer_rank: Optional[int]
+    gradient_accumulation_steps: int
+    sample_every_n_epochs: Optional[int]
+    sample_every_n_steps: Optional[int]
+    save_every_n_epochs: Optional[int]
+    save_every_n_steps: Optional[int]
 
 
 @dataclass
@@ -209,7 +230,7 @@ class Trainer:
     model: AutoModelForCausalLM
     processor: AutoProcessor
     optimizer: torch.optim.Optimizer
-    scheduler: torch.optim.lr_scheduler.LRScheduler
+    scheduler: Optional[torch.optim.lr_scheduler.LRScheduler]
     accelerator: Accelerator
     datasets: Datasets
     config: TrainingConfig
@@ -224,81 +245,145 @@ class Trainer:
 
         step = 0
 
-        for epoch in range(self.config.epochs):
-            print("Epoch:", epoch)
-            progress = tqdm(
-                total=len(self.datasets.train_dataloader),
+        progress = tqdm(
+            total=(
+                len(self.datasets.train_dataloader)
+                // self.config.gradient_accumulation_steps
             )
+            * self.config.epochs,
+        )
+        for epoch in range(self.config.epochs):
+            epoch = epoch + 1
+            print("Epoch:", epoch)
             for idx, (batch, labels) in enumerate(
                 self.datasets.train_dataloader
             ):
-                step += 1
                 with self.accelerator.accumulate(self.model):
                     outputs = self.process_batch(batch)
 
                     loss = outputs.loss
 
+                    self.accelerator.backward(loss)
+
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+
+                    if self.scheduler:
+                        self.scheduler.step()
+
                     loss_recorder.add(
-                        epoch=epoch,
+                        epoch=epoch - 1,
                         step=idx,
                         loss=loss.detach().item(),
                     )
 
-                    self.accelerator.backward(loss)
+                    if self.accelerator.sync_gradients:
+                        step += 1
+                        progress.set_postfix(
+                            {"avg_loss": loss_recorder.moving_average}
+                        )
+                        progress.update()
 
-                    progress.set_postfix(
-                        {
-                            "loss": loss_recorder.moving_average,
-                            # "lr": self.scheduler.get_last_lr(),
-                        }
-                    )
-                    # print("Loss:", loss.item())
+                        self.accelerator.log(
+                            {"avg_loss": loss_recorder.moving_average},
+                            step=step,
+                        )
 
-                    # loss.backward()
+                    # Sample
+                    if (
+                        self.config.sample_every_n_steps is not None
+                        and step % self.config.sample_every_n_steps == 0
+                    ):
+                        self.sample(batch, labels)
 
-                    self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
-                    # self.scheduler.step()
+                    # Save
+                    if (
+                        self.config.save_every_n_steps is not None
+                        and step % self.config.save_every_n_steps == 0
+                    ):
+                        self.save_model(f"step-{step}")
 
-                    progress.update()
+            # Sample
+            if (
+                self.config.sample_every_n_epochs is not None
+                and epoch % self.config.sample_every_n_epochs == 0
+            ):
+                self.sample(batch, labels)
 
-                if idx % (len(self.datasets.train_dataloader) // 5) == 0:
-                    self.sample(batch, labels)
+            # Save
+            if (
+                self.config.save_every_n_epochs is not None
+                and epoch % self.config.save_every_n_epochs == 0
+            ):
+                self.save_model(f"epoch-{epoch}")
 
-        print(f"Saved to {self.config.output_dir}")
-        # hugging face models saved to the directory
-        self.accelerator.wait_for_everyone()
-        unwrapped_model = self.accelerator.unwrap_model(self.model)
-        unwrapped_model.save_pretrained(
-            args.output_dir,
-            is_main_process=self.accelerator.is_main_process,
-            save_function=self.accelerator.save,
-        )
+        self.save_model()
 
-    @torch.no_grad()
     def sample(self, batch, texts):
-        with self.accelerator.autocast():
+        with torch.no_grad(), self.accelerator.autocast():
             generated_output = self.model.generate(
                 **batch,
                 max_new_tokens=75,
                 do_sample=False,
                 num_beams=3,
             )
-            decoded = self.processor.batch_decode(
-                generated_output, skip_special_tokens=True
-            )
 
-        # text = batch.pop("text")
+        decoded = self.processor.batch_decode(
+            generated_output, skip_special_tokens=True
+        )
 
         for gen, cap in zip(decoded, texts):
             print(f"Gen: {gen}")
             print(f"Cap: {cap}")
 
+    def save_model(self, name=None):
+        # hugging face models saved to the directory
+        self.accelerator.wait_for_everyone()
+        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        if name is not None:
+            name = "_" + str(name)
+        else:
+            name = ""
+        unwrapped_model.save_pretrained(
+            Path(self.config.output_dir + name),
+            save_function=self.accelerator.save,
+        )
 
-# Set the model as ready for training, makes sure the gradient are on
+        print(f"Saved to {self.config.output_dir + name}")
 
 
-def set_up_model(model_id, training_config, device):
+def set_up_model(model_id, training_config, args):
+    quantization_config = None
+    if args.quantize:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        trust_remote_code=True,
+        quantization_config=quantization_config,
+    )
+
+    # model = prepare_model_for_kbit_training(
+    #     model, use_gradient_checkpointing=True
+    # )
+
+    if args.activation_checkpointing:
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+        print("Using gradient checkpointing")
+    elif args.gradient_checkpointing:
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+        print("Using gradient checkpointing")
+
+    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
     config = LoraConfig(
         r=training_config.rank,
         lora_alpha=training_config.alpha,
@@ -309,16 +394,10 @@ def set_up_model(model_id, training_config, device):
         target_modules=training_config.target_modules,
         task_type="CAUSAL_LM",
         inference_mode=False,
-        use_rslora=True,
+        use_rslora=training_config.rslora,
         init_lora_weights="gaussian",
+        # init_lora_weights="olora",
     )
-
-    # loading the model in float16
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, trust_remote_code=True
-    )
-
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
     # We layer our PEFT on top of our model using the PEFT config
     model = get_peft_model(model, config)
@@ -343,7 +422,10 @@ def set_up_datasets(
     print(len(dataset))
     print(next(iter(dataset)))
 
-    train_dataset = ImageCaptioningDataset(dataset, processor)
+    train_dataset = ImageCaptioningDataset(
+        dataset,
+        processor,
+    )
 
     def collate(items):
         # pad the input_ids and attention_mask
@@ -366,10 +448,10 @@ def set_up_datasets(
             "pixel_values": torch.stack(pixel_values),
         }, texts
 
-    # Set batch_size to the batch that works for you.
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
+        generator=torch.Generator(),
         batch_size=training_config.batch_size,
         collate_fn=collate,
     )
@@ -380,17 +462,6 @@ def set_up_datasets(
 
 
 # All the linear modules
-BLIP_TARGET_MODULES = [
-    "self.query",
-    "self.key",
-    "self.value",
-    "output.dense",
-    "self_attn.qkv",
-    "self_attn.projection",
-    "mlp.fc1",
-    "mlp.fc2",
-]
-
 FLORENCE_TARGET_MODULES = [
     "qkv",
     "proj",
@@ -414,68 +485,50 @@ def main(args):
         batch_size=args.batch_size,
         epochs=args.epochs,
         output_dir=args.output_dir,
+        optimizer_rank=args.optimizer_rank,
+        rslora=args.rslora,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        sample_every_n_epochs=args.sample_every_n_epochs,
+        sample_every_n_steps=args.sample_every_n_steps,
+        save_every_n_epochs=args.save_every_n_epochs,
+        save_every_n_steps=args.save_every_n_steps,
     )
 
-    model, processor = set_up_model(
-        args.model_id, training_config, args.device
-    )
+    if args.seed:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
 
-    if args.activation_checkpointing:
-        model.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False},
-        )
+    print(f"Output results into: {str(Path(args.output_dir))}")
+
+    model, processor = set_up_model(args.model_id, training_config, args)
 
     datasets = set_up_datasets(
         args.dataset_dir, processor, training_config, args.device
     )
 
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-    )
-    # accelerator = flora_opt.FloraAccelerator(
-    #     gradient_accumulation_steps=args.gradient_accumulation_steps,
-    #     accumulation_compression_rank=args.accumulation_rank,
-    # )
-
-    model, processor = accelerator.prepare(model, processor)
-    datasets.accelerate(accelerator)
-
-    print(f"Setup optimizer LR={training_config.learning_rate}")
-
     # Setup AdamW
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=training_config.learning_rate,
-        weight_decay=training_config.weight_decay,
+    optimizer = get_optimizer(model, args.optimizer_name, training_config)
+    scheduler = None
+
+    if args.scheduler:
+        scheduler = get_scheduler(
+            optimizer,
+            training_config,
+            args,
+            steps_per_epoch=len(datasets.train_dataloader),
+        )
+
+    accelerator = get_accelerator(args)
+    model, processor, scheduler, optimizer = accelerator.prepare(
+        model, processor, scheduler, optimizer
     )
-
-    # optimizer = flora_opt.Flora(
-    #     model.parameters(),
-    #     lr=training_config.learning_rate,
-    #     rank=args.optimizer_rank,
-    #     relative_step=False,
-    # )
-
-    # scheduler = optim.lr_scheduler.OneCycleLR(
-    #     optimizer,
-    #     max_lr=training_config.learning_rate,
-    #     # total_steps=None,
-    #     epochs=training_config.epochs,
-    #     cycle_momentum=False,
-    #     steps_per_epoch=len(datasets.train_dataloader),
-    #     base_momentum=0.85,
-    #     max_momentum=0.95,
-    # )
-    #
-    # optimizer, scheduler = accelerator.prepare(optimizer, scheduler)
-    optimizer = accelerator.prepare(optimizer)
+    datasets.accelerate(accelerator)
 
     trainer = Trainer(
         model=model,
         processor=processor,
         optimizer=optimizer,
-        # scheduler=scheduler,
-        scheduler=None,
+        scheduler=scheduler,
         accelerator=accelerator,
         datasets=datasets,
         config=training_config,
@@ -486,18 +539,9 @@ def main(args):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
         description="""
-    Caption trainer for Florence
+        Florence 2 trainer
 
-    Designed to be used with Hugging Face datasets.
 
-    ---
-
-    Use compile_captions.py to create a compatible dataset from
-    image/text pairing.
-
-    Example: a.png a.txt
-
-    Creates a datasets compatible metadata.jsonl from those pairings.
     """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -518,8 +562,20 @@ if __name__ == "__main__":
         default="microsoft/Florence-2-base-ft",
         help="Model to train on. microsoft/Florence-2-base-ft or microsoft/Florence-2-large-ft. Default: microsoft/Florence-2-base-ft",
     )
+    argparser.add_argument(
+        "--seed", default=None, help="Seed used for random numbers"
+    )
+    argparser.add_argument(
+        "--log_with",
+        choices=["all", "wandb", "tensorboard"],
+        help="Log with. all, wandb, tensorboard",
+    )
+    argparser.add_argument(
+        "--name", help="Name to be used with saving and logging"
+    )
 
     argparser = training_config_args(argparser)
+    argparser = opt_config_args(argparser)
 
     args = argparser.parse_args()
     main(args)

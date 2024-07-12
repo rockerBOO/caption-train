@@ -40,13 +40,13 @@ source venv/bin/activate # venv\Scripts\activate.bat on windows
 
 ### Dependencies
 
-With the venv activated.
+With the `venv` activated.
 
 ```
 pip install -r requirements.txt
 ```
 
-or with Poetry
+Or with Poetry.
 
 ```bash
 poetry install
@@ -61,8 +61,8 @@ Additional [Poetry install instructions](https://python-poetry.org/docs/#install
 
 ### Setup dataset from text/image pairs
 
-```bash
-$ poetry run python compile_captions.py --help
+```
+$ python compile_captions.py --help
 usage: compile_captions.py [-h] dataset_dir output_dir
 
         Create hugging face dataset compatible caption file
@@ -90,9 +90,9 @@ $ python compile_captions.py /path/to/captions/dir /path/to/output_dir
 
 ### Run BLIP training
 
-```bash
-$ python train4.py --help
-usage: train4.py [-h] [--device DEVICE] [--model_id MODEL_ID] [--rank RANK] [--alpha ALPHA] [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]] [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY]
+```
+$ accelerate launch train_blip_network.py --help
+usage: train_blip_network.py [-h] [--device DEVICE] [--model_id MODEL_ID] [--rank RANK] [--alpha ALPHA] [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]] [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY]
                  [--batch_size BATCH_SIZE] [--epochs EPOCHS]
                  dataset_dir output_dir
 
@@ -102,7 +102,7 @@ usage: train4.py [-h] [--device DEVICE] [--model_id MODEL_ID] [--rank RANK] [--a
 
     ---
 
-    Use compile_captions.py to create a compatible dataset from
+    Use `compile_captions.py` to create a compatible dataset from
     image/text pairing.
 
     Example: a.png a.txt
@@ -134,7 +134,7 @@ options:
 
 ### BLIP LoRA Inference
 
-```bash
+```
 $ python inference.py --help
 usage: inference.py [-h] [--base_model BASE_MODEL] [--peft_model PEFT_MODEL] --images IMAGES [--beams BEAMS] [--seed SEED] [--save_captions] [--caption_extension CAPTION_EXTENSION] [--max_token_length MAX_TOKEN_LENGTH]
 
@@ -165,7 +165,7 @@ echo "Input: $input"
 echo "LoRA Model: $lora_model"
 echo "Base Model: $base_model"
 
-python inference.py \
+accelerate launch inference.py \
 	--base_model=$base_model \
 	--images $input \
 	--beams=10 \
@@ -225,8 +225,7 @@ options:
 ### Example Florence 2 training
 
 ```bash
-python train_florence.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
-
+accelerate launch train_florence.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
 ```
 
 ## Florence 2 Inference
@@ -268,8 +267,7 @@ options:
 Inference example
 
 ```bash
-$ python inference.py --images /path/to/images/ --peft_model models/my_lora
-
+$ accelerate launch inference.py --images /path/to/images/ --peft_model models/my_lora
 ```
 
 ## Example Florence 2 bash script

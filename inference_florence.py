@@ -82,7 +82,8 @@ def main(args):
 
             image_file = Path(img)
 
-            print(image_file.stem, parsed_answer[task])
+            print(image_file.stem)
+            print(parsed_answer[task])
 
             caption_file = image_file.with_name(
                 image_file.stem + args.caption_extension
@@ -90,7 +91,9 @@ def main(args):
 
             if caption_file.is_file():
                 if args.overwrite is False:
-                    print(f"Caption already exists for {str(caption_file)}")
+                    # print(f"Caption already exists for {str(caption_file)}")
+                    with open(caption_file, "r") as r:
+                        print(r.read())
                     continue
 
             with open(caption_file, "w", encoding="utf-8") as f:
@@ -136,7 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="Seed for rng")
 
     parser.add_argument(
-        "task",
+        "--task",
         default="<DETAILED_CAPTION>",
         choices=["<CAPTION>", "<DETAILED_CAPTION>", "<MORE_DETAILED_CAPTION>"],
         help="Task to run the captioning on.",
@@ -145,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
+        default=1,
         help="Number of images to caption in the batch",
     )
 
