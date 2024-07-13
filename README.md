@@ -110,7 +110,7 @@ $ python compile_captions.py /path/to/captions/dir /path/to/output_dir
 ## Run BLIP training
 
 ```
-$ accelerate launch train_blip_network.py --help
+$ accelerate launch train_blip_peft.py --help
 usage: train_blip_network.py [-h] [--device DEVICE] [--model_id MODEL_ID] [--rank RANK] [--alpha ALPHA] [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]] [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY]
                  [--batch_size BATCH_SIZE] [--epochs EPOCHS]
                  dataset_dir output_dir
@@ -197,8 +197,8 @@ accelerate launch inference.py \
 Training of LoRA for Florence 2 base and large.
 
 ```
-$ python train_florence_lora.py --help
-usage: train_florence_lora.py [-h] [--dataset_dir DATASET_DIR] [--output_dir OUTPUT_DIR] [--device DEVICE] [--model_id MODEL_ID] [--seed SEED] [--log_with {all,wandb,tensorboard}] [--name NAME] [--rank RANK] [--alpha ALPHA]
+$ python train_florence_peft.py --help
+usage: train_florence_peft.py [-h] [--dataset_dir DATASET_DIR] [--output_dir OUTPUT_DIR] [--device DEVICE] [--model_id MODEL_ID] [--seed SEED] [--log_with {all,wandb,tensorboard}] [--name NAME] [--rank RANK] [--alpha ALPHA]
                               [--dropout DROPOUT] [--target_modules TARGET_MODULES [TARGET_MODULES ...]] [--learning_rate LEARNING_RATE] [--weight_decay WEIGHT_DECAY] [--batch_size BATCH_SIZE]
                               [--gradient_accumulation_steps GRADIENT_ACCUMULATION_STEPS] [--epochs EPOCHS] [--gradient_checkpointing] [--quantize] [--accumulation_compression] [--rslora]
                               [--sample_every_n_epochs SAMPLE_EVERY_N_EPOCHS] [--sample_every_n_steps SAMPLE_EVERY_N_STEPS] [--save_every_n_epochs SAVE_EVERY_N_EPOCHS] [--save_every_n_steps SAVE_EVERY_N_STEPS]
@@ -267,7 +267,7 @@ options:
 Train a Florence 2 LoRA on your dataset.
 
 ```bash
-accelerate launch train_florence_lora.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
+accelerate launch train_florence_peft.py --dataset_dir /path/to/image-text-pairs --output_dir loras/my-lora-name
 ```
 
 ## Florence 2 inference
