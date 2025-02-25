@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "accelerate>=1.2.1",
-  "datasets>=2.20.0",
   "numpy<2",
   "einops>=0.8.0",
   "evaluate>=0.4.3",
@@ -23,9 +22,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-flash_attn = [
-  "flash-attn>=2.7.4.post1",
-]
 janus = [
   "janus",
 ]
@@ -37,10 +33,7 @@ gpu_metrics = [
   "pynvml>=12.0.0",
 ]
 onnx = [
-    "onnxruntime-gpu>=1.20.1",
-]
-llm = [
-  "openai",
+  "onnxruntime-gpu>=1.20.1",
 ]
 cpu = [
   "torch>=2.6.0",
@@ -55,6 +48,12 @@ cu121 = [
   "bitsandbytes>=0.45.3",
   "torch>=2.5.1",
   "torchvision>=0.20.1",
+]
+llm = [
+    "openai>=1.63.2",
+]
+flash-attn = [
+    "flash-attn>=2.7.4.post1",
 ]
 
 [dependency-groups]
