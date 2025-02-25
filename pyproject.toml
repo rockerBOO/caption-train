@@ -11,7 +11,6 @@ dependencies = [
   "numpy<2",
   "einops>=0.8.0",
   "evaluate>=0.4.3",
-  "onnxruntime-gpu>=1.20.1",
   "open-clip-torch>=2.30.0",
   "peft>=0.14.0",
   "pillow>=11.1.0",
@@ -37,6 +36,9 @@ server = [
 ]
 gpu_metrics = [
   "pynvml>=12.0.0",
+]
+onnx = [
+  "onnxruntime-gpu>=1.20.1",
 ]
 llm = [
   "openai",
