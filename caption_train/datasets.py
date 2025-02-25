@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader, Dataset
 from dataclasses import dataclass
 
 from caption_train.captions import shuffle_caption
-# from .trainer import FileConfig, TrainingConfig
 
 
 class ImageCaptioningDataset(Dataset):
