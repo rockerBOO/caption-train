@@ -28,7 +28,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install the project
-        run: uv sync --all-extras --no-extra cu124 --dev
+        run: uv sync --frozen --extra cpu --dev
 
       - name: Run tests
         run: uv run pytest tests
