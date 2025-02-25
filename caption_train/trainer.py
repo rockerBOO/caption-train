@@ -60,6 +60,12 @@ class FileConfig:
     output_dir: Path
     dataset_dir: Optional[Path]
     dataset: Optional[Path]
+    combined_suffix: Optional[str]
+    generated_suffix: Optional[str]
+    caption_file_suffix: Optional[str]
+    recursive: bool
+    num_workers: int
+    debug_dataset: bool
 
 
 @dataclass
@@ -96,8 +102,18 @@ class Trainer:
 
         return logs
 
-    def train(self):
+    def start_training(self):
         self.model.train()
+        if "wandb" in self.accelerator.trackers:
+            import wandb
+
+            wandb_tracker = self.accelerator.get_tracker("wandb")
+
+            wandb_tracker.define_metric("*", step_metric="global_step")
+            wandb_tracker.define_metric("global_step", hidden=True)
+
+    def train(self):
+        self.start_training()
         loss_recorder = LossRecorder()
 
         step = 0
@@ -108,7 +124,7 @@ class Trainer:
         for epoch in range(self.config.epochs):
             epoch = epoch + 1
             self.accelerator.print("Epoch:", epoch)
-            for idx, (batch, labels) in enumerate(self.datasets.train_dataloader):
+            for idx, batch in enumerate(self.datasets.train_dataloader):
                 self.optimizer.train()
                 with self.accelerator.accumulate(self.model):
                     outputs, loss = self.process_batch(batch)
@@ -133,8 +149,7 @@ class Trainer:
                     progress.update()
 
                     self.accelerator.log(
-                        {"avg_loss": loss_recorder.moving_average, **self.optimizer_logs()},
-                        step=step,
+                        {"avg_loss": loss_recorder.moving_average, **self.optimizer_logs(), "global_step": step}
                     )
 
                     # Sample
@@ -162,7 +177,9 @@ class Trainer:
         with self.accelerator.autocast():
             generated_output = self.model.generate(**batch)
 
-        decoded = self.processor.batch_decode(generated_output, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        decoded = self.processor.batch_decode(
+            generated_output, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
 
         for gen, cap in zip(decoded, texts):
             print(f"Gen: {gen}")

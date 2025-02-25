@@ -67,7 +67,7 @@ class ImageCaptioningDataset(Dataset):
         return encoding, text
 
 
-class ImageCaptionPairDataset(Dataset):
+class FlorenceImageTextDataset(Dataset):
     def __init__(
         self,
         dataset,
@@ -146,38 +146,41 @@ class Datasets:
 
 
 def set_up_image_text_pair(
-    dataset_dir: Path, model: torch.nn.Module, processor: AutoProcessor, accelerator, training_config
+    model: torch.nn.Module, processor: AutoProcessor, accelerator, training_config, dataset_config
 ) -> Datasets:
-    images = (
-        list(Path(dataset_dir).rglob("*.png"))
-        + list(Path(dataset_dir).rglob("*.jpg"))
-        + list(Path(dataset_dir).rglob("*.jpeg"))
-        + list(Path(dataset_dir).rglob("*.webp"))
-    )
+    dataset_dir = dataset_config.dataset_dir
 
+    def glob(path: Path):
+        if dataset_config.recursive:
+            return path.rglob("*.*")
+        else:
+            return path.glob("*.*")
+
+    # Find images
+    extensions = [".png", ".jpg", ".jpeg", ".webp"]
+    images = [file for ext in extensions for file in glob(dataset_dir) if file.suffix.lower() in extensions]
+
+    assert len(images) > 0, "No images found in the dataset"
+
+    caption_file_suffix = dataset_config.caption_file_suffix
+    if caption_file_suffix is None:
+        caption_file_suffix = ""
+
+    # Load captions for images
     image_captions = []
     for image in images:
         image = Path(image)
-        caption_file = image.with_name(image.stem + "_combined.txt")
+        caption_file = image.with_name(image.stem + caption_file_suffix + ".txt")
+
+        if not Path(caption_file).exists():
+            print(f"No caption foud for {image}")
+            continue
+
         with open(caption_file, "r") as f:
             caption = f.read()
         image_captions.append(caption)
 
-    # accelerator.print("Caching dataset")
-    # pre_generated_captions: list[str] = []
-    # for image in tqdm(images):
-    #     processed: dict[str, torch.Tensor] = processor(
-    #         images=[Image.open(image)], text=["<MORE_DETAILED_CAPTION>"], return_tensors="pt"
-    #     )
-    #     with torch.no_grad(), accelerator.autocast():
-    #         generated = model.generate(**processed.to(model.device))
-    #     generated = processor.batch_decode(generated, skip_special_tokens=True)
-    #     pre_generated_captions.append(generated)
-    # train_dataset = [
-    #     {"image": image, "text": caption, "generated_caption": pre_generated_caption}
-    #     for image, caption, pre_generated_caption in zip(images, image_captions, pre_generated_captions)
-    # ]
-
+    assert len(image_captions) == len(images), "Did not find a caption for all images"
     train_dataset = [{"image": image, "text": caption} for image, caption in zip(images, image_captions)]
 
     def collate(items):
@@ -199,9 +202,9 @@ def set_up_image_text_pair(
             "labels": torch.stack(labels),
             "attention_mask": torch.stack(attention_masks),
             "pixel_values": torch.stack(pixel_values),
-        }, texts
+        }
 
-    image_pair_dataset = ImageCaptionPairDataset(
+    image_pair_dataset = FlorenceImageTextDataset(
         train_dataset,
         processor,
         max_length=training_config.max_length,
@@ -214,12 +217,13 @@ def set_up_image_text_pair(
         shuffle=True,
         generator=torch.Generator(),
         batch_size=training_config.batch_size,
-        num_workers=4,
+        num_workers=dataset_config.num_workers,
         collate_fn=collate,
         pin_memory=True,
     )
 
-    print(next(iter(train_dataloader)))
+    if dataset_config.debug_dataset:
+        print(next(iter(train_dataloader)))
 
     datasets = Datasets(
         image_pair_dataset,
@@ -265,7 +269,7 @@ def set_up_datasets(dataset_dir: Path, processor: AutoProcessor, training_config
             "labels": torch.stack(labels),
             "attention_mask": torch.stack(attention_masks),
             "pixel_values": torch.stack(pixel_values),
-        }, texts
+        }
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -297,6 +301,40 @@ def datasets_config_args(argparser: argparse.ArgumentParser):
         type=Path,
         required=True,
         help="Save the LoRA files to this directory",
+    )
+    arggroup.add_argument(
+        "--combined_suffix",
+        type=str,
+        default=None,
+        help="Suffix for the combined caption file. Default to `_combined`",
+    )
+    arggroup.add_argument(
+        "--generated_suffix",
+        type=str,
+        default=None,
+        help="Suffix for the generated caption file. Default to `_generated`",
+    )
+    arggroup.add_argument(
+        "--caption_file_suffix",
+        type=str,
+        default=None,
+        help='Suffix for the caption file. Default to ""',
+    )
+    arggroup.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Whether to recursively search for images and captions",
+    )
+    arggroup.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="Number of workers to use for the dataloader. Default to 0",
+    )
+    arggroup.add_argument(
+        "--debug_dataset",
+        action="store_true",
+        help="Whether to print the first batch of the dataloader",
     )
 
     return argparser, arggroup

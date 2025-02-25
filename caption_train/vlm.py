@@ -28,7 +28,7 @@ def vlm_conversation(text: str, base64_image: str) -> list:
 
     return conversation
 
-def janus_generate_caption(model: MultiModalityCausalLM, processor: VLChatProcessor, accelerator: Accelerator, prompt: str, image: str | Path | Image) -> list[str]:
+def janus_generate_caption(model: MultiModalityCausalLM, processor: VLChatProcessor, accelerator: Accelerator, prompt: str, image: str | Path | Image.Image) -> list[str]:
     """
     Generate captions for images using Janus
 
