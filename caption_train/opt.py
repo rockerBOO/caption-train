@@ -1,6 +1,5 @@
 from typing import Optional
 
-import bitsandbytes as bnb
 import torch
 from accelerate import Accelerator
 from torch import optim
@@ -18,6 +17,8 @@ def get_optimizer(model, learning_rate: float, optimizer_config: OptimizerConfig
         optimizer = optim.AdamW(model.parameters(), **optimizer_args)
         print("Use AdamW optimizer: ", optimizer_args)
     elif optimizer_name == "AdamW8bit":
+        import bitsandbytes as bnb
+
         optimizer_args = {"lr": learning_rate, **optimizer_args}
         optimizer = bnb.optim.AdamW8bit(model.parameters(), **optimizer_args)
         print("Use AdamW8bit optimizer: ", optimizer_args)
