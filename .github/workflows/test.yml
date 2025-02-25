@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - "**/*.py"
+      - ".github/**"
   pull_request:
     branches:
       - main
     paths:
       - "**/*.py"
+      - ".github/**"
 
 jobs:
   test:
