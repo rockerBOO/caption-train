@@ -37,7 +37,7 @@ gpu_metrics = [
   "pynvml>=12.0.0",
 ]
 onnx = [
-  "onnxruntime-gpu>=1.20.1",
+    "onnxruntime-gpu>=1.20.1",
 ]
 llm = [
   "openai",
@@ -51,6 +51,11 @@ cu124 = [
   "torchvision>=0.21.0",
   "bitsandbytes>=0.45.0",
 ]
+cu121 = [
+  "torch>=2.5.1",
+  "torchvision>=0.20.1",
+  "bitsandbytes>=0.45.0",
+]
 
 [dependency-groups]
 dev = [
@@ -62,6 +67,7 @@ dev = [
 conflicts = [
   [
     { extra = "cpu" },
+    { extra = "cu121" },
     { extra = "cu124" },
   ],
 ]
@@ -69,10 +75,12 @@ conflicts = [
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu121", extra = "cu121" },
   { index = "pytorch-cu124", extra = "cu124" },
 ]
 torchvision = [
   { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu121", extra = "cu121" },
   { index = "pytorch-cu124", extra = "cu124" },
 ]
 janus = { git = "https://github.com/deepseek-ai/Janus.git" }
@@ -81,6 +89,11 @@ caption-train = { workspace = true }
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
 explicit = true
 
 [[tool.uv.index]]
