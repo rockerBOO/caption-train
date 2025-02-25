@@ -1,9 +1,11 @@
+import ast
+import argparse
 from typing import List
 
 from pynvml import (
-    nvmlInit,
     nvmlDeviceGetHandleByIndex,
     nvmlDeviceGetMemoryInfo,
+    nvmlInit,
 )
 
 
@@ -30,3 +32,14 @@ def print_gpu_utilization():
     handle = nvmlDeviceGetHandleByIndex(0)
     info = nvmlDeviceGetMemoryInfo(handle)
     print(f"GPU memory occupied: {info.used//1024**2} MB.")
+
+
+def parse_dict(input_str):
+    """Convert string input into a dictionary."""
+    try:
+        # Use ast.literal_eval to safely evaluate the string as a Python literal (dict)
+        return ast.literal_eval(input_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid dictionary format: {input_str}"
+        )

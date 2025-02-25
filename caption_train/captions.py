@@ -87,3 +87,49 @@ def shuffle_caption(text, shuffle_on=", ", frozen_parts=1, dropout=0.0):
     random.shuffle(final_parts)
 
     return shuffle_on.join(frozen + final_parts)
+
+
+def blend_sentences(source1, source2, num_sentences):
+    """
+    Blend sentences from two sources.
+
+    Args:
+        source1 (list): List of sentences from the first source.
+        source2 (list): List of sentences from the second source.
+        num_sentences (int): Number of sentences to generate.
+
+    Returns:
+        list: List of blended sentences.
+    """
+
+    # Check if the number of sentences is valid
+    if num_sentences <= 0:
+        return []
+
+    # Initialize an empty list to store the blended sentences
+    blended_sentences = []
+
+    # Loop until we have generated the required number of sentences
+    for _ in range(num_sentences):
+        # Randomly select a sentence from each source
+        sentence1 = random.choice(source1)
+        sentence2 = random.choice(source2)
+
+        # Randomly decide how to blend the sentences
+        blend_type = random.random()
+
+        # If blend_type is less than 0.5, append the second sentence to the first
+        if blend_type < 0.5:
+            blended_sentence = sentence1 + " " + sentence2
+        # If blend_type is between 0.5 and 0.75, insert the second sentence in the middle of the first
+        elif blend_type < 0.75:
+            mid_index = len(sentence1) // 2
+            blended_sentence = sentence1[:mid_index] + " " + sentence2 + " " + sentence1[mid_index:]
+        # Otherwise, prepend the second sentence to the first
+        else:
+            blended_sentence = sentence2 + " " + sentence1
+
+        # Add the blended sentence to the list
+        blended_sentences.append(blended_sentence)
+
+    return blended_sentences

@@ -56,13 +56,9 @@ def sample(example, model, processor, accelerator):
             min_length=3,
             max_length=75,
         )
-        generated_captions = processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )
+        generated_captions = processor.batch_decode(generated_ids, skip_special_tokens=True)
 
-    for example_caption in processor.batch_decode(
-        example["input_ids"], skip_special_tokens=True
-    ):
+    for example_caption in processor.batch_decode(example["input_ids"], skip_special_tokens=True):
         print(f"Cap: {example_caption}")
 
     for generated_caption in generated_captions:
@@ -126,9 +122,7 @@ def collate_fn(processor):
         processed_batch = {}
         for key in batch[0].keys():
             if key != "text":
-                processed_batch[key] = torch.stack(
-                    [example[key] for example in batch]
-                )
+                processed_batch[key] = torch.stack([example[key] for example in batch])
             else:
                 text_inputs = processor.tokenizer(
                     [example["text"] for example in batch],
@@ -136,9 +130,7 @@ def collate_fn(processor):
                     return_tensors="pt",
                 )
                 processed_batch["input_ids"] = text_inputs["input_ids"]
-                processed_batch["attention_mask"] = text_inputs[
-                    "attention_mask"
-                ]
+                processed_batch["attention_mask"] = text_inputs["attention_mask"]
         return processed_batch
 
     return process_collate_fn
@@ -183,17 +175,11 @@ def setup_dataset(processor, args):
                 seed=args.seed,
             )
 
-            validation_dataset = (
-                test_dataset["train"] if args.validation_split > 0.0 else []
-            )
-            test_dataset = (
-                test_dataset["test"] if args.test_split > 0.0 else []
-            )
+            validation_dataset = test_dataset["train"] if args.validation_split > 0.0 else []
+            test_dataset = test_dataset["test"] if args.test_split > 0.0 else []
         else:
             # Split between train and validation datasets
-            validation_dataset = ds.train_test_split(
-                test_size=args.validation_split, shuffle=True, seed=args.seed
-            )
+            validation_dataset = ds.train_test_split(test_size=args.validation_split, shuffle=True, seed=args.seed)
             test_dataset = []
 
         print(validation_dataset)
@@ -279,9 +265,7 @@ def wrap_in_ia3(model, args):
         "attention.output.dense",
         "self_attn.projection",
     ]
-    peft_config = IA3Config(
-        target_modules=target_modules, feedforward_modules=ff_modules
-    )
+    peft_config = IA3Config(target_modules=target_modules, feedforward_modules=ff_modules)
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -338,9 +322,7 @@ def wrap_in_lora(model, args):
 
 def get_scheduler(optimizer, train_dataset_length, args):
     # Placeholder scheduler
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=[lambda v: v]
-    )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=[lambda v: v])
     scheduler_args = args.scheduler_args
 
     if args.lr_scheduler == "CyclicLR":
@@ -354,27 +336,20 @@ def get_scheduler(optimizer, train_dataset_length, args):
             },
             **scheduler_args,
         }
-        scheduler = torch.optim.lr_scheduler.CyclicLR(
-            optimizer, **scheduler_args
-        )
+        scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, **scheduler_args)
 
     if args.lr_scheduler == "OneCycleLR":
         epochs = args.epochs
 
         scheduler_args = {
             **{
-                "steps_per_epoch": int(
-                    train_dataset_length
-                    / (args.batch_size * args.gradient_accumulation_steps)
-                ),
+                "steps_per_epoch": int(train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)),
                 "epochs": epochs,
             },
             **scheduler_args,
         }
         print(scheduler_args)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, **scheduler_args
-        )
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **scheduler_args)
 
     # CosineAnnealingLR
 
@@ -382,9 +357,7 @@ def get_scheduler(optimizer, train_dataset_length, args):
     if args.lr_scheduler == "CosineAnnealingLR":
         n_epochs = args.epochs
         print(n_epochs * train_dataset_length)
-        steps = (n_epochs * train_dataset_length) / (
-            args.batch_size * args.gradient_accumulation_steps
-        )
+        steps = (n_epochs * train_dataset_length) / (args.batch_size * args.gradient_accumulation_steps)
         steps = n_epochs * train_dataset_length
         print(
             "CosineAnnealingLR",
@@ -392,28 +365,18 @@ def get_scheduler(optimizer, train_dataset_length, args):
         )
         scheduler_args = {**{"T_max": steps}, **scheduler_args}
         print(scheduler_args)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, **scheduler_args
-        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, **scheduler_args)
         print(scheduler)
 
     if args.lr_scheduler == "CosineAnnealingWarmRestarts":
         n_epochs = 1
-        steps = int(
-            n_epochs
-            * (
-                train_dataset_length
-                / (args.batch_size * args.gradient_accumulation_steps)
-            )
-        )
+        steps = int(n_epochs * (train_dataset_length / (args.batch_size * args.gradient_accumulation_steps)))
         t_mult = 2
         scheduler_args = {
             **{"steps": steps, "T_mult": t_mult},
             **scheduler_args,
         }
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, **scheduler_args
-        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **scheduler_args)
 
     if scheduler is None:
         raise RuntimeError("Invalid scheduler")
@@ -436,9 +399,7 @@ def get_optimizer(model, args):
         }
         print("Using Prodigy optimizer")
         print(optimizer_args)
-        optimizer = Prodigy(
-            model.parameters(), lr=args.learning_rate, **optimizer_args
-        )
+        optimizer = Prodigy(model.parameters(), lr=args.learning_rate, **optimizer_args)
 
     # DADAPTATION
 
@@ -450,9 +411,7 @@ def get_optimizer(model, args):
         optimizer_args = {"lr": lr, "decouple": True}
         print("Using DAdaptation optimizer")
         print(optimizer_args)
-        optimizer = DAdaptAdam(
-            model.parameters(), weight_decay=weight_decay, **optimizer_args
-        )
+        optimizer = DAdaptAdam(model.parameters(), weight_decay=weight_decay, **optimizer_args)
 
     # ADAM
     if args.optimizer == "AdamW":
@@ -471,12 +430,8 @@ def compute_metrics(eval_pred, processor, wer):
     logits, labels = eval_pred
     predicted = logits.argmax(-1)
     decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
-    decoded_predictions = processor.batch_decode(
-        predicted, skip_special_tokens=True
-    )
-    wer_score = wer.compute(
-        predictions=decoded_predictions, references=decoded_labels
-    )
+    decoded_predictions = processor.batch_decode(predicted, skip_special_tokens=True)
+    wer_score = wer.compute(predictions=decoded_predictions, references=decoded_labels)
     return {"wer_score": wer_score}
 
 
@@ -512,9 +467,7 @@ def get_git_model(args):
 
 
 def get_auto_model(args):
-    auto_config = AutoConfig.from_pretrained(
-        args.model_name_or_path, **args.model_config_args
-    )
+    auto_config = AutoConfig.from_pretrained(args.model_name_or_path, **args.model_config_args)
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -536,8 +489,7 @@ def step_log(logs, lr_scheduler, optimizer, accelerator, args):
     if "d" in optimizer.param_groups[0]:
         logs["lr/d*lr"] = (
             # optimizer.param_groups[0].get("d") * scheduler.get_last_lr()[0]
-            optimizer.param_groups[0].get("d")
-            * args.learning_rate
+            optimizer.param_groups[0].get("d") * args.learning_rate
         )
 
     # Plot momentum
@@ -570,9 +522,7 @@ def clip_score(model, processor, metric, accelerator):
                 min_length=3,
                 max_length=75,
             )
-            generated_captions = processor.batch_decode(
-                generated_ids, skip_special_tokens=True
-            )
+            generated_captions = processor.batch_decode(generated_ids, skip_special_tokens=True)
 
             score = metric(
                 example["pixel_values"].clamp(0, 1),
@@ -609,16 +559,10 @@ def calculate_metrics(wer, processor):
         logits, labels = predictions
         predicted = logits.argmax(-1)
 
-        decoded_labels = processor.batch_decode(
-            labels, skip_special_tokens=True
-        )
-        decoded_predictions = processor.batch_decode(
-            predicted, skip_special_tokens=True
-        )
+        decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
+        decoded_predictions = processor.batch_decode(predicted, skip_special_tokens=True)
 
-        wer_score = wer.compute(
-            predictions=decoded_predictions, references=decoded_labels
-        )
+        wer_score = wer.compute(predictions=decoded_predictions, references=decoded_labels)
 
         return {"wer_score": wer_score}
 
@@ -636,7 +580,6 @@ def process_batch(batch, model, processor, accelerator, args):
     #     print(k, batch[k].shape)
 
     with accelerator.autocast():
-
         # labels = input_ids
         # if isinstance(model.base_model, GitModel):
         #     kwargs = {"labels": labels}
@@ -649,7 +592,7 @@ def process_batch(batch, model, processor, accelerator, args):
         #     attention_mask=attention_mask,
         #     **kwargs,
         # )
-        labels = { "labels": batch['input_ids'] }
+        labels = {"labels": batch["input_ids"]}
         outputs = model(**{**batch, **labels})
 
         # print(outputs)
@@ -657,8 +600,6 @@ def process_batch(batch, model, processor, accelerator, args):
         # logits = outputs["logits"]
         loss = outputs.loss
         logits = outputs.decoder_logits
-
-
 
         # precision_metric = evaluate.load("precision")
         #
@@ -872,9 +813,7 @@ def train(
     optimizer, optimizer_args = get_optimizer(model, args)
 
     # SCHEDULER
-    lr_scheduler, lr_scheduler_args = get_scheduler(
-        optimizer, len(train_dataloader.dataset), args
-    )
+    lr_scheduler, lr_scheduler_args = get_scheduler(optimizer, len(train_dataloader.dataset), args)
 
     # OUTPUT
     output_dir = Path(args.output_dir)
@@ -932,9 +871,7 @@ def train(
     )
     print(f"train dataloader {len(train_dataloader)} post-accelerator")
 
-    print(
-        f"({len(train_dataloader)} * {args.epochs}) / ({args.gradient_accumulation_steps})"
-    )
+    print(f"({len(train_dataloader)} * {args.epochs}) / ({args.gradient_accumulation_steps})")
 
     print(lr_scheduler)
 
@@ -953,19 +890,11 @@ def train(
         wandb_tracker.define_metric("epoch_step", hidden=True)
         wandb_tracker.define_metric("validation_step", hidden=True)
         wandb_tracker.define_metric("loss/current", step_metric="current_step")
-        wandb_tracker.define_metric(
-            "loss/validation_current", step_metric="validation_step"
-        )
+        wandb_tracker.define_metric("loss/validation_current", step_metric="validation_step")
         wandb_tracker.define_metric("wer_score", step_metric="validation_step")
-        wandb_tracker.define_metric(
-            "loss/validation_average", step_metric="epoch_step"
-        )
-        wandb_tracker.define_metric(
-            "loss/epoch_average", step_metric="epoch_step"
-        )
-        wandb_tracker.define_metric(
-            "wer_score_average", step_metric="epoch_step"
-        )
+        wandb_tracker.define_metric("loss/validation_average", step_metric="epoch_step")
+        wandb_tracker.define_metric("loss/epoch_average", step_metric="epoch_step")
+        wandb_tracker.define_metric("wer_score_average", step_metric="epoch_step")
 
         # Magic
         wandb_tracker.watch(model, log_freq=100)
@@ -979,14 +908,7 @@ def train(
     # model = model.to_bettertransformer()
 
     progress_bar = tqdm(
-        range(
-            int(
-                math.ceil(
-                    (len(train_dataloader) * args.epochs)
-                    / (args.gradient_accumulation_steps)
-                )
-            )
-        ),
+        range(int(math.ceil((len(train_dataloader) * args.epochs) / (args.gradient_accumulation_steps)))),
         smoothing=0,
         disable=not accelerator.is_local_main_process,
         desc="steps",
@@ -1008,26 +930,18 @@ def train(
 
         # EPOCHS
         for epoch in range(args.epochs):
-            accelerator.print(f"\nepoch {epoch+1}/{args.epochs}")
+            accelerator.print(f"\nepoch {epoch + 1}/{args.epochs}")
 
             # BATCH
             for step, batch in enumerate(train_dataloader):
                 with accelerator.accumulate(model):
                     optimizer.zero_grad()
-                    loss, logits = process_batch(
-                        batch, model, processor, accelerator, args
-                    )
+                    loss, logits = process_batch(batch, model, processor, accelerator, args)
 
                     accelerator.backward(loss)
 
-                    if (
-                        accelerator.sync_gradients
-                        and args.max_grad_norm is not None
-                        and args.max_grad_norm != 0.0
-                    ):
-                        accelerator.clip_grad_norm_(
-                            model.parameters(), args.max_grad_norm
-                        )
+                    if accelerator.sync_gradients and args.max_grad_norm is not None and args.max_grad_norm != 0.0:
+                        accelerator.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
                     optimizer.step()
                     optimizer.zero_grad(set_to_none=True)
@@ -1053,9 +967,7 @@ def train(
                             "loss/average": loss_recorder.moving_average,
                         }
 
-                        logs = step_log(
-                            logs, lr_scheduler, optimizer, accelerator, args
-                        )
+                        logs = step_log(logs, lr_scheduler, optimizer, accelerator, args)
 
                         accelerator.log(logs, step=global_step)
 
@@ -1065,10 +977,7 @@ def train(
                         }
 
                         if "d" in optimizer.param_groups[0]:
-                            postfix["d*lr"] = (
-                                optimizer.param_groups[0].get("d")
-                                * lr_scheduler.get_last_lr()[0]
-                            )
+                            postfix["d*lr"] = optimizer.param_groups[0].get("d") * lr_scheduler.get_last_lr()[0]
 
                         progress_bar.set_postfix(postfix)
 
@@ -1087,25 +996,18 @@ def train(
             with torch.no_grad():
                 for val_step, batch in enumerate(v_dataloader):
                     val_progress_bar.update(1)
-                    loss, logits = process_batch(
-                        batch, model, processor, accelerator, args
-                    )
+                    loss, logits = process_batch(batch, model, processor, accelerator, args)
 
                     current_loss = loss.detach().item()
 
                     metrics = calc_metrics((logits, batch["input_ids"]))
 
-                    val_loss_recorder.add(
-                        epoch=epoch, step=val_step, loss=current_loss
-                    )
-                    val_wer_recorder.add(
-                        epoch=epoch, step=val_step, loss=metrics["wer_score"]
-                    )
+                    val_loss_recorder.add(epoch=epoch, step=val_step, loss=current_loss)
+                    val_wer_recorder.add(epoch=epoch, step=val_step, loss=metrics["wer_score"])
 
                     accelerator.log(
                         {
-                            "validation_step": val_step
-                            + (len(v_dataloader) * epoch),
+                            "validation_step": val_step + (len(v_dataloader) * epoch),
                             "loss/validation_current": current_loss,
                             "wer_score": metrics["wer_score"],
                         },
@@ -1129,12 +1031,9 @@ def train(
                 sample(val, model, processor, accelerator)
 
             # Save every n epochs
-            if (
-                args.save_every_n_epochs != 0
-                and args.save_every_n_epochs % (epoch + 1) == 0
-            ):
+            if args.save_every_n_epochs != 0 and args.save_every_n_epochs % (epoch + 1) == 0:
                 accelerator.wait_for_everyone()
-                save_epoch_to = f"{save_to}_{epoch+1}"
+                save_epoch_to = f"{save_to}_{epoch + 1}"
                 print(f"Saved to {save_epoch_to}")
                 model.save_pretrained(save_epoch_to, safe_serialization=True)
 
@@ -1160,9 +1059,7 @@ def train(
         scores.append((score, example["pixel_values"], caption))
 
     clip_score_average = sum([score[0] for score in scores]) / len(scores)
-    print(
-        f"average CLIP score {sum([score[0] for score in scores])/len(scores)}"
-    )
+    print(f"average CLIP score {sum([score[0] for score in scores]) / len(scores)}")
 
     if args.log_with in ["wandb", "all"]:
         # data = {
@@ -1177,10 +1074,7 @@ def train(
         # [tbl.add_data(wandb.Image(image), label) for image, label in zip(images, labels)]
         tbl = wandb.Table(columns=["clip_score", "image", "caption"])
 
-        [
-            tbl.add_data(score, wandb.Image(image, caption=caption), caption)
-            for (score, image, caption) in scores
-        ]
+        [tbl.add_data(score, wandb.Image(image, caption=caption), caption) for (score, image, caption) in scores]
         accelerator.log({"clip_scores": tbl}, step=global_step)
         accelerator.log(
             {"clip_score_average": clip_score_average},
@@ -1190,10 +1084,7 @@ def train(
     accelerator.end_training()
 
     # SAVE MODEL
-    if (
-        args.save_every_n_epochs != 0
-        and args.save_every_n_epochs % (args.epochs + 1) != 0
-    ):
+    if args.save_every_n_epochs != 0 and args.save_every_n_epochs % (args.epochs + 1) != 0:
         accelerator.wait_for_everyone()
         print(f"Saved to {save_to}")
         model.save_pretrained(save_to, safe_serialization=True)
@@ -1258,9 +1149,7 @@ if __name__ == "__main__":
         help="Directory for where the image/captions are stored. Is recursive.",
     )
 
-    argparser.add_argument(
-        "--learning_rate", type=float, help="Learning rate for the training"
-    )
+    argparser.add_argument("--learning_rate", type=float, help="Learning rate for the training")
 
     argparser.add_argument(
         "--model_name_or_path",
@@ -1306,9 +1195,7 @@ if __name__ == "__main__":
         help="Use gradient checkpointing",
     )
 
-    argparser.add_argument(
-        "--max_grad_norm", type=float, default=None, help="Max gradient norm"
-    )
+    argparser.add_argument("--max_grad_norm", type=float, default=None, help="Max gradient norm")
 
     argparser.add_argument(
         "--shuffle_captions",
@@ -1335,9 +1222,7 @@ if __name__ == "__main__":
         help="PEFT module to use in training",
     )
 
-    argparser.add_argument(
-        "--seed", default=42, help="Seed for the random number generation"
-    )
+    argparser.add_argument("--seed", default=42, help="Seed for the random number generation")
 
     argparser.add_argument(
         "--interactive",
@@ -1391,9 +1276,7 @@ if __name__ == "__main__":
         help="Number of samples to make of the validation dataset",
     )
 
-    argparser.add_argument(
-        "--log_with", type=str, default=None, help="Log with"
-    )
+    argparser.add_argument("--log_with", type=str, default=None, help="Log with")
     argparser.add_argument("--peft_args", default={}, help="PEFT args")
 
     # epochs = 5

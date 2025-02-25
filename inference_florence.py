@@ -1,11 +1,13 @@
 import argparse
 import glob
 from pathlib import Path
+from tqdm import tqdm
 
+import torch
 from accelerate import Accelerator
-from peft import AutoPeftModelForCausalLM
+from peft.auto import AutoPeftModelForCausalLM
 from PIL import Image
-from transformers import AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 available_models = [
     "microsoft/Florence-2-base-ft",
@@ -15,16 +17,22 @@ available_models = [
 ]
 
 
+@torch.inference_mode()
 def main(args):
-    processor = AutoProcessor.from_pretrained(
-        args.base_model, trust_remote_code=True
-    )
+    print(args)
+    processor = AutoProcessor.from_pretrained(args.base_model, trust_remote_code=True)
 
     accelerator = Accelerator()
 
-    model = AutoPeftModelForCausalLM.from_pretrained(
-        args.peft_model, trust_remote_code=True
-    )
+    if args.peft_model:
+        model = AutoPeftModelForCausalLM.from_pretrained(
+            args.peft_model, trust_remote_code=True, revision=args.revision
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model, trust_remote_code=True
+        )
+
     model, processor = accelerator.prepare(model, processor)
     model.eval()
 
@@ -34,7 +42,7 @@ def main(args):
         images = sum(
             [
                 glob.glob(str(images_path.absolute()) + f"/*.{f}")
-                for f in ["jpg", "jpeg", "png", "webp", "avif", "bmp"]
+                for f in ["jpg", "jpeg", ".JPG", ".PNG", "png", "webp", "avif", "bmp"]
             ],
             [],
         )
@@ -49,16 +57,10 @@ def main(args):
 
     task = args.task
 
-    for i in range(0, len(images), batch_size):
+    for i in tqdm(range(0, len(images), batch_size)):
+        batch = [Image.open(img).convert("RGB") for img in images[i : i + batch_size]]
 
-        batch = [
-            Image.open(img).convert("RGB")
-            for img in images[i : i + batch_size]
-        ]
-
-        inputs = processor(
-            text=[task] * len(batch), images=batch, return_tensors="pt"
-        )
+        inputs = processor(text=[task] * len(batch), images=batch, return_tensors="pt")
 
         with accelerator.autocast():
             generated_ids = model.generate(
@@ -89,28 +91,38 @@ def main(args):
                 image_file.stem + args.caption_extension
             )
 
+            if args.save_captions is False:
+                continue
+
             if caption_file.is_file():
-                if args.overwrite is False:
-                    # print(f"Caption already exists for {str(caption_file)}")
-                    # with open(caption_file, "r") as r:
-                    #     print(r.read())
+                if args.append is True:
+                    print(f"Appending to {caption_file}")
+                    with open(caption_file, "a", encoding="utf-8") as f:
+                        f.write(" " + parsed_answer[task])
+
                     continue
 
-            with open(caption_file, "w", encoding="utf-8") as f:
-                f.write(parsed_answer[task])
+                if args.overwrite is False:
+                    print(f"Caption already exists for {str(caption_file)}")
+                    with open(caption_file, "r") as r:
+                        print(r.read())
+                    continue
+
+
+
+            else:
+                with open(caption_file, "w", encoding="utf-8") as f:
+                    f.write(parsed_answer[task])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="""
-        Train a LoRA on a Florence model for image captioning.
-
+        Image captioning using Florence 2
 
         $ python inference.py --images /path/to/images/ --peft_model models/my_lora
 
         See --save_captions if producing an image/text file pair dataset.
-
-
         """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -118,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_model",
         type=str,
-        choices=available_models,
+        # choices=available_models,
         default="microsoft/Florence-2-base-ft",
         help="Model to load from hugging face 'microsoft/Florence-2-base-ft'",
     )
@@ -154,6 +166,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--save_captions",
+        default=False,
         action="store_true",
         help="Save captions to the images next to the image.",
     )
@@ -162,6 +175,11 @@ if __name__ == "__main__":
         "--overwrite",
         action="store_true",
         help="Overwrite caption files with new caption. Default: We skip writing captions that already exist",
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append captions to the captions that already exist or write the caption.",
     )
 
     parser.add_argument(
@@ -175,6 +193,11 @@ if __name__ == "__main__":
         type=int,
         default=75,
         help="Maximum number of tokens to generate",
+    )
+    parser.add_argument(
+        "--revision",
+        default=None,
+        help="Revision of the model to load. Default: None",
     )
 
     args = parser.parse_args()
