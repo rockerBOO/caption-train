@@ -7,13 +7,9 @@ Train IQA for captioning using 🤗 compatible models.
 - [Caption Trainer](#caption-trainer)
   - [Support](#support)
   - [Install](#install)
-    - [venv](#venv)
     - [Dependencies](#dependencies)
   - [Usage](#usage)
     - [Setup dataset from text/image pairs](#setup-dataset-from-textimage-pairs)
-  - [Run BLIP training](#run-blip-training)
-  - [BLIP LoRA inference](#blip-lora-inference)
-  - [Example BLIP LoRA usage bash script](#example-blip-lora-usage-bash-script)
   - [Development](#development)
     - [Test](#test)
 

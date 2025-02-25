@@ -9,7 +9,6 @@ from peft.mapping import get_peft_model
 from transformers import (
     AutoModelForCausalLM,
     AutoProcessor,
-    BitsAndBytesConfig,
 )
 
 from caption_train.opt import (
@@ -33,6 +32,7 @@ from caption_train.trainer import (
 def set_up_model(model_id, training_config: TrainingConfig, peft_config: PeftConfig):
     quantization_config = None
     if args.quantize:
+        from transformers import BitsAndBytesConfig
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
