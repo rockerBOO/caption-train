@@ -47,14 +47,14 @@ cpu = [
   "torchvision>=0.21.0",
 ]
 cu124 = [
+  "bitsandbytes>=0.45.3",
   "torch>=2.6.0",
   "torchvision>=0.21.0",
-  "bitsandbytes>=0.45.0",
 ]
 cu121 = [
+  "bitsandbytes>=0.45.3",
   "torch>=2.5.1",
   "torchvision>=0.20.1",
-  "bitsandbytes>=0.45.0",
 ]
 
 [dependency-groups]
