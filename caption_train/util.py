@@ -2,12 +2,6 @@ import ast
 import argparse
 from typing import List
 
-from pynvml import (
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetMemoryInfo,
-    nvmlInit,
-)
-
 
 class LossRecorder:
     def __init__(self):
@@ -28,10 +22,16 @@ class LossRecorder:
 
 
 def print_gpu_utilization():
+    from pynvml import (
+        nvmlDeviceGetHandleByIndex,
+        nvmlDeviceGetMemoryInfo,
+        nvmlInit,
+    )
+
     nvmlInit()
     handle = nvmlDeviceGetHandleByIndex(0)
     info = nvmlDeviceGetMemoryInfo(handle)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
+    print(f"GPU memory occupied: {info.used // 1024**2} MB.")
 
 
 def parse_dict(input_str):
@@ -40,6 +40,4 @@ def parse_dict(input_str):
         # Use ast.literal_eval to safely evaluate the string as a Python literal (dict)
         return ast.literal_eval(input_str)
     except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"Invalid dictionary format: {input_str}"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid dictionary format: {input_str}")
