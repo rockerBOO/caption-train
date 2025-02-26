@@ -14,8 +14,11 @@ from tqdm import tqdm
 
 from caption_train.opt import get_accelerator
 from caption_train.llm import get_combined_caption
+from caption_train.trainer import FileConfig
+from caption_train.util import get_group_args
 from caption_train.vlm import janus_generate_caption
 from caption_train.ratelimit import RateLimitContext, RateLimiter
+from caption_train.datasets import datasets_config_args, find_images
 
 
 @torch.no_grad()
@@ -187,22 +190,31 @@ def combine_captions(
         progress_bar.update(1)
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace, dataset_config: FileConfig):
     client = openai.OpenAI(base_url=args.base_url)
 
-    dataset_dir = args.dataset_dir
+    dataset_dir = dataset_config.dataset_dir
     model_id = args.model_id
 
     system_prompt = None
-    with open(args.system_prompt, "r") as f:
-        system_prompt = f.read()
+    if args.system_prompt is not None and args.system_prompt.exists():
+        with open(args.system_prompt, "r") as f:
+            system_prompt = f.read()
 
-    assert system_prompt is not None
+    assert system_prompt is not None, "System prompt not specified or could not be loaded"
+    assert dataset_dir is not None, "Dataset directory not specified"
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id, revision=args.revision, trust_remote_code=args.trust_remote_code
     )
-    model.to(dtype=torch.bfloat16)
+
+    if args.dtype == "bf16":
+        model = model.to(torch.bfloat16)
+    elif args.dtype == "fp16":
+        model = model.to(torch.float16)
+    elif args.dtype == "fp8":
+        model = model.to(torch.float8_e4m3fn)
+
     model.eval()
     load_model_on_device(model, torch.device("cpu"))
     if model_id in ["deepseek-ai/Janus-Pro-1B"]:
@@ -223,12 +235,9 @@ def main(args: argparse.Namespace):
     accelerator = get_accelerator(args)
     model, processor = accelerator.prepare(model, processor, device_placement=[False, True])
 
-    images = (
-        list(Path(dataset_dir).rglob("*.png"))
-        + list(Path(dataset_dir).rglob("*.jpg"))
-        + list(Path(dataset_dir).rglob("*.jpeg"))
-        + list(Path(dataset_dir).rglob("*.webp"))
-    )
+    images = find_images(dataset_dir)
+
+    assert len(images) > 0, f"No images found in the dataset directory: {dataset_dir}"
 
     # Image captions from manual captioning
     # -------------------------------------
@@ -242,7 +251,9 @@ def main(args: argparse.Namespace):
     load_model_on_device(model, torch.device("cpu"))
     accelerator.free_memory()
 
-    assert len(images) == len(image_captions) == len(pre_generated_captions)
+    assert len(images) == len(image_captions) == len(pre_generated_captions), (
+        f"Did not create captoins for all the images images: {len(images)} image captions: {len(image_captions)} generated captions: {len(pre_generated_captions)}"
+    )
 
     # Combine captions using LLM
     # --------------------------
@@ -253,7 +264,14 @@ def main(args: argparse.Namespace):
 
 
 def cache_if_needed_combined_caption(
-    client: OpenAI, limiter: RateLimitContext, model: str, system_prompt: str, image: Path, image_caption, pre_generated_caption, max_tokens=2048
+    client: OpenAI,
+    limiter: RateLimitContext,
+    model: str,
+    system_prompt: str,
+    image: Path,
+    image_caption,
+    pre_generated_caption,
+    max_tokens=2048,
 ) -> str | None:
     """
     Return the combined caption or generate combined caption if it isn't cached
@@ -315,7 +333,7 @@ if __name__ == "__main__":
         help="Dataset directory to load images from. Images can be paired with .txt files with captions.",
     )
     parser.add_argument("--prompt", type=str, default=None, help="Prompt to use for VLM")
-    parser.add_argument("--system_prompt", type=str, default="system_prompt.txt", help="System prompt file to load")
+    parser.add_argument("--system_prompt", type=Path, default="system_prompt.txt", help="System prompt file to load")
     parser.add_argument("--model_id", type=str, required=True, help="VLM Model to load from hugging face")
     parser.add_argument("--revision", type=str, default="main", help="Revision to use on hugging face models")
     parser.add_argument("--trust_remote_code", action="store_true", help="Trust remote code for hugging face models")
@@ -329,6 +347,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cache_generated_captions_to_disk", action="store_true", help="Cache generated captions to disk"
     )
+    parser.add_argument("--dtype", type=str, default=None, help="Model dtype to use")
+    parser, dataset_group = datasets_config_args(parser)
     args = parser.parse_args()
 
-    main(args)
+    dataset_config = get_group_args(args, dataset_group)
+
+    main(args, dataset_config)

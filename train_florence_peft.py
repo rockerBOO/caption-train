@@ -1,4 +1,3 @@
-from pathlib import Path
 import argparse
 from accelerate.utils import set_seed
 import torch
@@ -11,6 +10,7 @@ from transformers import (
     AutoProcessor,
 )
 
+from caption_train.util import get_group_args
 from caption_train.opt import (
     get_accelerator,
     get_optimizer,
@@ -91,6 +91,7 @@ FLORENCE_TARGET_MODULES = [
     "out_proj",
     "fc1",
     "fc2",
+    # "dw" conv
 ]
 
 
@@ -112,7 +113,7 @@ def main(
     accelerator = get_accelerator(args)
     model, processor = accelerator.prepare(model, processor)
 
-    print("Loading optimizer")
+    accelerator.print("Loading optimizer")
     # Optimizer
     optimizer = get_optimizer(model, training_config.learning_rate, optimizer_config)
     optimizer = accelerator.prepare(optimizer)
@@ -120,7 +121,7 @@ def main(
     # Scheduler
     scheduler = None
 
-    print("Loading dataset")
+    accelerator.print("Loading dataset")
     dataset_loc = args.dataset or args.dataset_dir
     if dataset_loc.is_dir():
         datasets = set_up_image_text_pair(model, processor, accelerator, training_config, dataset_config)
@@ -138,7 +139,7 @@ def main(
 
     datasets.accelerate(accelerator)
 
-    print("Start training")
+    accelerator.print("Start training")
     trainer = Trainer(
         model=model,
         processor=processor,
@@ -169,8 +170,6 @@ if __name__ == "__main__":
 
     args = argparser.parse_args()
 
-    def get_group_args(args, group):
-        return {action.dest: getattr(args, action.dest) for action in group._group_actions}
 
     training_config = TrainingConfig(**get_group_args(args, training_group))
     optimizer_config = OptimizerConfig(**get_group_args(args, opt_group))

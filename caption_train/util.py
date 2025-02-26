@@ -41,3 +41,7 @@ def parse_dict(input_str):
         return ast.literal_eval(input_str)
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid dictionary format: {input_str}")
+
+
+def get_group_args(args, group):
+    return {action.dest: getattr(args, action.dest) for action in group._group_actions}

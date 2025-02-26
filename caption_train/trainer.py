@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from accelerate.optimizer import AcceleratedOptimizer
+from peft.peft_model import PeftModelForCausalLM
 from tqdm import tqdm
 from dataclasses import dataclass
 from typing import Optional, List
@@ -188,13 +189,13 @@ class Trainer:
     def save_model(self, name=None):
         # hugging face models saved to the directory
         self.accelerator.wait_for_everyone()
-        unwrapped_model = self.accelerator.unwrap_model(self.model)
+        unwrapped_model: PeftModelForCausalLM = self.accelerator.unwrap_model(self.model)
         if name is not None:
             name = "_" + str(name)
         else:
             name = ""
         unwrapped_model.save_pretrained(
-            Path(self.file_config.output_dir) / name,
+            str(Path(self.file_config.output_dir) / name),
             save_function=self.accelerator.save,
         )
 

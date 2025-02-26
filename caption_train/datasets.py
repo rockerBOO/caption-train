@@ -145,20 +145,27 @@ class Datasets:
         self.train_dataloader = accelerator.prepare(self.train_dataloader)
 
 
+def glob(path: Path, recursive=False):
+    if recursive:
+        return path.rglob("*.*")
+    else:
+        return path.glob("*.*")
+
+
+def find_images(dir: Path, recursive=False) -> set[Path]:
+    # Find images
+    extensions = [".png", ".jpg", ".jpeg", ".webp"]
+    images = {file for ext in extensions for file in glob(dir, recursive) if file.suffix.lower() in extensions}
+
+    return images
+
+
 def set_up_image_text_pair(
     model: torch.nn.Module, processor: AutoProcessor, accelerator, training_config, dataset_config
 ) -> Datasets:
     dataset_dir = dataset_config.dataset_dir
 
-    def glob(path: Path):
-        if dataset_config.recursive:
-            return path.rglob("*.*")
-        else:
-            return path.glob("*.*")
-
-    # Find images
-    extensions = [".png", ".jpg", ".jpeg", ".webp"]
-    images = [file for ext in extensions for file in glob(dataset_dir) if file.suffix.lower() in extensions]
+    images = find_images(dataset_dir, dataset_config.recursive)
 
     assert len(images) > 0, "No images found in the dataset"
 
