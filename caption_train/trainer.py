@@ -156,7 +156,7 @@ class Trainer:
                     # Sample
                     if self.config.sample_every_n_steps is not None and step % self.config.sample_every_n_steps == 0:
                         self.optimizer.eval()
-                        self.sample(batch, labels)
+                        self.sample(batch)
 
                     # Save
                     if self.config.save_every_n_steps is not None and step % self.config.save_every_n_steps == 0:
@@ -165,7 +165,7 @@ class Trainer:
             # Sample
             if self.config.sample_every_n_epochs is not None and epoch % self.config.sample_every_n_epochs == 0:
                 self.optimizer.eval()
-                self.sample(batch, labels)
+                self.sample(batch)
 
             # Save
             if self.config.save_every_n_epochs is not None and epoch % self.config.save_every_n_epochs == 0:
@@ -174,7 +174,11 @@ class Trainer:
         self.save_model()
 
     @torch.no_grad()
-    def sample(self, batch, texts):
+    def sample(self, batch):
+        texts = []
+        for item in batch["text"]:
+            texts.append(item)
+        del batch["text"]
         with self.accelerator.autocast():
             generated_output = self.model.generate(**batch)
 

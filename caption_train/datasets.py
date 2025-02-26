@@ -209,6 +209,7 @@ def set_up_image_text_pair(
             "labels": torch.stack(labels),
             "attention_mask": torch.stack(attention_masks),
             "pixel_values": torch.stack(pixel_values),
+            "text": texts
         }
 
     image_pair_dataset = FlorenceImageTextDataset(
