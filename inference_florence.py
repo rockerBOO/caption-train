@@ -62,7 +62,7 @@ def main(args):
     model, processor = accelerator.prepare(model, processor)
     model.eval()
 
-    accelerator.print("Loading images")
+    accelerator.print(f"Loading images {args.images}")
     images_path = args.images
 
     if images_path.is_dir():
@@ -70,13 +70,8 @@ def main(args):
     else:
         images = [images_path]
 
-    images.sort()
     batch_size = args.batch_size
-
     task = args.task
-
-    for image in images:
-        print(image)
 
     accelerator.print(f"Processing {len(images)} images")
     dataset = ImageDataset(images, task, processor)
@@ -113,7 +108,14 @@ def process_image(model, processor, batch: dict[str, torch.Tensor], task: str, i
 
         print(image_file.stem)
         print(parsed_answer[task])
-        process_caption(image_file, parsed_answer[task], args.caption_extension)
+        process_caption(
+            image_file,
+            parsed_answer[task],
+            save_captions=args.save_captions,
+            append=args.append,
+            overwrite=args.overwrite,
+            caption_extension=args.caption_extension,
+        )
 
 
 def process_caption(
@@ -121,18 +123,18 @@ def process_caption(
 ) -> None:
     caption_file = image_file.with_name(image_file.stem + caption_extension)
 
-    if args.save_captions is False:
+    if save_captions is False:
         return
 
     if caption_file.is_file():
-        if args.append is True:
+        if append is True:
             print(f"Appending to {caption_file}")
             with open(caption_file, "a", encoding="utf-8") as f:
                 f.write(" " + caption)
 
             return
 
-        if args.overwrite is False:
+        if overwrite is False:
             print(f"Caption already exists for {str(caption_file)}")
             with open(caption_file, "r") as r:
                 print(r.read())

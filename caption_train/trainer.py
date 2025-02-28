@@ -4,7 +4,7 @@ from accelerate.optimizer import AcceleratedOptimizer
 from peft.peft_model import PeftModelForCausalLM
 from tqdm import tqdm
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Literal, Optional, List, Union
 import torch
 from accelerate import Accelerator
 from transformers import AutoProcessor, Blip2ForConditionalGeneration
@@ -43,7 +43,8 @@ class PeftConfig:
     rank: int
     alpha: int
     rslora: bool
-    target_modules: List[str]
+    target_modules: Optional[Union[List[str], str]]
+    init_lora_weights: Literal["gaussian", "eva", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"]
 
 
 @dataclass
@@ -54,6 +55,7 @@ class OptimizerConfig:
     accumulation_rank: Optional[int]
     activation_checkpointing: Optional[bool]
     optimizer_rank: Optional[int]
+    lora_plus_ratio: Optional[int]
 
 
 @dataclass
@@ -127,13 +129,12 @@ class Trainer:
             self.accelerator.print("Epoch:", epoch)
             for idx, batch in enumerate(self.datasets.train_dataloader):
                 self.optimizer.train()
+                self.optimizer.zero_grad(set_to_none=True)
                 with self.accelerator.accumulate(self.model):
-                    outputs, loss = self.process_batch(batch)
+                    _, loss = self.process_batch(batch)
 
                     self.accelerator.backward(loss)
-
                     self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
 
                     if self.scheduler:
                         self.scheduler.step()
@@ -160,7 +161,9 @@ class Trainer:
 
                     # Save
                     if self.config.save_every_n_steps is not None and step % self.config.save_every_n_steps == 0:
-                        self.save_model(f"step-{step}")
+                        self.accelerator.wait_for_everyone()
+                        if self.accelerator.is_main_process:
+                            self.save_model(f"step-{step}")
 
             # Sample
             if self.config.sample_every_n_epochs is not None and epoch % self.config.sample_every_n_epochs == 0:
@@ -169,18 +172,26 @@ class Trainer:
 
             # Save
             if self.config.save_every_n_epochs is not None and epoch % self.config.save_every_n_epochs == 0:
-                self.save_model(f"epoch-{epoch}")
+                self.accelerator.wait_for_everyone()
+                if self.accelerator.is_main_process:
+                    self.save_model(f"epoch-{epoch}")
 
         self.save_model()
 
     @torch.no_grad()
-    def sample(self, batch):
+    def sample(self, batch: dict[str, torch.Tensor]):
         texts = []
         for item in batch["text"]:
             texts.append(item)
         del batch["text"]
         with self.accelerator.autocast():
-            generated_output = self.model.generate(**batch)
+            device = self.model.device
+            dtype = self.model.dtype
+            generated_output = self.model.generate(
+                input_ids=batch["input_ids"].to(device),
+                pixel_values=batch["pixel_values"].to(device, dtype=dtype),
+                max_new_tokens=256
+            )
 
         decoded = self.processor.batch_decode(
             generated_output, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -211,8 +222,6 @@ def peft_config_args(argparser: argparse.ArgumentParser, target_modules):
 
     arggroup.add_argument(
         "--target_modules",
-        nargs="+",
-        type=list,
         default=target_modules,
         help=f"Target modules to be trained. Consider Linear and Conv2D modules in the base model. Default: {' '.join(target_modules)}.",
     )
@@ -233,6 +242,12 @@ def peft_config_args(argparser: argparse.ArgumentParser, target_modules):
         default=4,
         help="Alpha for scaling the LoRA weights. Default: 4",
     )
+    arggroup.add_argument(
+        "--init_lora_weights",
+        type=str,
+        default="gaussian",
+    )
+       
     return argparser, arggroup
 
 

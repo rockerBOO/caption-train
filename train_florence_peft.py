@@ -71,12 +71,19 @@ def set_up_model(model_id, training_config: TrainingConfig, peft_config: PeftCon
         task_type="CAUSAL_LM",
         inference_mode=False,
         use_rslora=peft_config.rslora,
-        init_lora_weights="gaussian",
+        init_lora_weights=peft_config.init_lora_weights,
     )
 
     # We layer our PEFT on top of our model using the PEFT config
     model = get_peft_model(model, config)
     model.print_trainable_parameters()
+
+    trainable_modules = 0
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            trainable_modules += 1
+
+    print(f"Trainable modules: {trainable_modules}")
 
     return model, processor
 

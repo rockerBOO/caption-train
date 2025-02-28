@@ -8,41 +8,63 @@ from .util import parse_dict
 from .trainer import OptimizerConfig
 
 
-def get_optimizer(model, learning_rate: float, optimizer_config: OptimizerConfig):
+def get_optimizer(model: torch.nn.Module, learning_rate: float, optimizer_config: OptimizerConfig):
     optimizer_name = optimizer_config.optimizer_name
     optimizer_args = optimizer_config.optimizer_args
 
+    parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
+
     if optimizer_name == "AdamW":
         optimizer_args = {"lr": learning_rate, **optimizer_args}
-        optimizer = optim.AdamW(model.parameters(), **optimizer_args)
+        optimizer = optim.AdamW(parameters, **optimizer_args)
         print("Use AdamW optimizer: ", optimizer_args)
     elif optimizer_name == "AdamW8bit":
         import bitsandbytes as bnb
 
         optimizer_args = {"lr": learning_rate, **optimizer_args}
-        optimizer = bnb.optim.AdamW8bit(model.parameters(), **optimizer_args)
+        optimizer = bnb.optim.AdamW8bit(parameters, **optimizer_args)
         print("Use AdamW8bit optimizer: ", optimizer_args)
     elif optimizer_name == "Flora":
         from flora_opt.optimizers.torch.flora import Flora
 
         optimizer_args = {"lr": learning_rate, **optimizer_args}
-        optimizer = Flora(model.parameters(), **optimizer_args)
+        optimizer = Flora(parameters, **optimizer_args)
         print("Use Flora optimizer: ", optimizer_args)
     elif optimizer_name == "ProdigyPlusScheduleFree":
         from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
 
+        if optimizer_config.lora_plus_ratio is not None:
+            parameters = lora_plus(parameters, learning_rate, optimizer_config.lora_plus_ratio)
+
         optimizer_args = {"lr": learning_rate, **optimizer_args}
-        optimizer = ProdigyPlusScheduleFree(model.parameters(), **optimizer_args)
+
+        optimizer = ProdigyPlusScheduleFree(parameters, **optimizer_args)
         print("Use ProdigyPlusScheduleFree optimizer: ", optimizer_args)
     else:
         from prodigyplus.prodigy_plus_schedulefree import ProdigyPlusScheduleFree
 
         optimizer_args = {"lr": learning_rate or 1.0, **optimizer_args}
-        optimizer = ProdigyPlusScheduleFree(model.parameters(), **optimizer_args)
+        optimizer = ProdigyPlusScheduleFree(parameters, **optimizer_args)
+
         print("Use ProdigyPlusScheduleFree optimizer: ", optimizer_args)
 
     return optimizer
 
+def lora_plus(parameters, learning_rate, ratio=16):
+    lora_parameters = []
+    lora_plus_parameters = []
+    for name, param in parameters:
+        if "lora_B" in name:
+            lora_plus_parameters.append(param)
+        else:
+            lora_parameters.append(param)
+
+    parameters = [
+        {"params": lora_parameters, "lr": learning_rate},
+        {"params": lora_plus_parameters, "lr": learning_rate * ratio},
+    ]
+
+    return parameters
 
 def get_accelerator(args):
     if hasattr(args, "accumulation_rank") and args.accumulation_rank is not None:
@@ -132,5 +154,6 @@ def opt_config_args(argparser):
         help="Flora optimizer rank for low-rank optimizer",
     )
     arggroup.add_argument("--optimizer_args", type=parse_dict, default={}, help="Optimizer args")
+    arggroup.add_argument("--lora_plus_ratio", type=int, default=None, help="Ratio to use with LoRA+")
 
     return argparser, arggroup
