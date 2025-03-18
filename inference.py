@@ -17,7 +17,7 @@ import torch
 # from itertools import batched
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def main(args):
     if args.seed:
         print(f"Using seed {args.seed}")

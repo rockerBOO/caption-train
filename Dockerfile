@@ -1,12 +1,6 @@
-# FROM python:3.10.12-alpine3.17
-# FROM python:3.10-slim 
-# FROM huggingface/transformers-pytorch-gpu:latest as builder
 FROM huggingface/transformers-pytorch-gpu:latest
 
 WORKDIR /app
-
-# RUN apk add musl-dev linux-headers g++
-# RUN apk add bash gcc
 
 COPY requirements.txt .
 
@@ -24,12 +18,7 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip && \
 
 
 RUN addgroup --system app && adduser --system --group app
-
-
 RUN chown app /app
-
-
-
 USER app
 
 COPY train2.py train2.py
