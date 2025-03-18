@@ -43,7 +43,9 @@ def get_generated_caption(
         generated.extend([janus_generate_caption(model, processor, accelerator, prompt, image) for image in images])
     else:
         text = [prompt] * len(images)
-        processed = processor(images=[Image.open(image) for image in images], text=text, return_tensors="pt")
+        pil_images = [Image.open(image) for image in images]
+        pil_images = [image.convert("RGB") if image.mode != "RGB" else image for image in pil_images]
+        processed = processor(images=pil_images, text=text, return_tensors="pt")
         with accelerator.autocast():
             generated = model.generate(max_length=256, **processed.to(model.device))
         generated = processor.batch_decode(generated, skip_special_tokens=True)
@@ -82,7 +84,12 @@ def cache_if_needed_generated_caption(
             needed_images.append(image)
         else:
             with open(file, "r") as f:
-                generated_captions.append(f.read())
+                caption = f.read().strip()
+                if len(caption) > 0:
+                    generated_captions.append(caption)
+                else:
+                    needed_files.append(file)
+                    needed_images.append(image)
 
     # Need to cache some files
     if len(needed_files) > 0:
@@ -219,6 +226,16 @@ def main(args: argparse.Namespace, dataset_config: FileConfig):
     load_model_on_device(model, torch.device("cpu"))
     if model_id in ["deepseek-ai/Janus-Pro-1B"]:
         processor = VLChatProcessor.from_pretrained(model_id, trust_remote_code=args.trust_remote_code)
+        processor.image_processor.background_color = tuple(
+            [
+                int(x * 255)
+                for x in (
+                    0.48145466,
+                    0.4578275,
+                    0.40821073,
+                )
+            ]
+        )
 
         assert isinstance(processor, VLChatProcessor)
         assert isinstance(model, MultiModalityCausalLM)
@@ -326,14 +343,9 @@ if __name__ == "__main__":
     """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument(
-        "--dataset_dir",
-        type=Path,
-        required=True,
-        help="Dataset directory to load images from. Images can be paired with .txt files with captions.",
-    )
     parser.add_argument("--prompt", type=str, default=None, help="Prompt to use for VLM")
-    parser.add_argument("--system_prompt", type=Path, default="system_prompt.txt", help="System prompt file to load")
+    parser.add_argument("--vlm_system_prompt", type=Path, default=None, help="VLM system prompt file to load.")
+    parser.add_argument("--llm_system_prompt", type=Path, default=None, help="LLM System prompt file to load.")
     parser.add_argument("--model_id", type=str, required=True, help="VLM Model to load from hugging face")
     parser.add_argument("--revision", type=str, default="main", help="Revision to use on hugging face models")
     parser.add_argument("--trust_remote_code", action="store_true", help="Trust remote code for hugging face models")
@@ -351,6 +363,6 @@ if __name__ == "__main__":
     parser, dataset_group = datasets_config_args(parser)
     args = parser.parse_args()
 
-    dataset_config = get_group_args(args, dataset_group)
+    dataset_config = FileConfig(**get_group_args(args, dataset_group))
 
     main(args, dataset_config)

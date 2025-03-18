@@ -28,7 +28,14 @@ def vlm_conversation(text: str, base64_image: str) -> list:
 
     return conversation
 
-def janus_generate_caption(model: MultiModalityCausalLM, processor: VLChatProcessor, accelerator: Accelerator, prompt: str, image: str | Path | Image.Image) -> list[str]:
+
+def janus_generate_caption(
+    model: MultiModalityCausalLM,
+    processor: VLChatProcessor,
+    accelerator: Accelerator,
+    prompt: str,
+    image: str | Path | Image.Image,
+) -> list[str]:
     """
     Generate captions for images using Janus
 
@@ -45,12 +52,26 @@ def janus_generate_caption(model: MultiModalityCausalLM, processor: VLChatProces
     if not isinstance(image, Image.Image):
         image = Image.open(image)
 
+    # Convert images to RGB as is required by Janus processor
+    image = image.convert("RGB")
+
+    assert isinstance(processor, VLChatProcessor)
+
+    # ensure the background color is set due to errors
+    processor.image_processor.background_color = tuple([int(x * 255) for x in (
+        0.48145466,
+        0.4578275,
+        0.40821073,
+    )])
+
     conversation = vlm_conversation(prompt, encode_image(image))
-    processed = processor(images=[image], conversations=conversation, return_tensors="pt")
+
+    processed = processor(images=[image], conversations=conversation, return_tensors="pt", force_batchify=True).to(model.device)
 
     # run the model to get the response
     with accelerator.autocast():
-        inputs_embeds = model.prepare_inputs_embeds(**processed.to(model.device))
+        # processed.images_seq_mask = processed.images_seq_mask.long()
+        inputs_embeds = model.prepare_inputs_embeds(**processed)
         generated = model.language_model.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=processed.attention_mask,
@@ -62,6 +83,5 @@ def janus_generate_caption(model: MultiModalityCausalLM, processor: VLChatProces
             use_cache=True,
         )
     generated = processor.tokenizer.decode(generated[0].cpu().tolist(), skip_special_tokens=True)
-    generated = [generated]
 
     return generated
