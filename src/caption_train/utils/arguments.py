@@ -17,17 +17,17 @@ def create_base_parser(
     description: str = "Model training script", formatter_class: type = argparse.RawTextHelpFormatter
 ) -> argparse.ArgumentParser:
     """Create base argument parser with common arguments.
-    
+
     This function creates a foundational ArgumentParser that contains arguments
     common to all training scripts. It serves as the base for model-specific
     parsers created by create_florence_parser(), create_git_parser(), etc.
-    
+
     Common Arguments Added:
         --config: Path to TOML configuration file for loading training parameters
         --model_id: HuggingFace model identifier (e.g., "microsoft/Florence-2-base-ft")
         --dataset: Path to dataset directory or file
         --output_dir: Output directory for saving trained models (required)
-    
+
     Usage Pattern:
         This function is typically called by model-specific parser creators:
         ```python
@@ -36,7 +36,7 @@ def create_base_parser(
         parser, peft_group = peft_config_args(parser, target_modules)
         parser, training_group = training_config_args(parser)
         ```
-    
+
     Configuration File Support:
         The --config argument allows users to specify TOML files containing
         training parameters. Config files are merged with command-line arguments,
@@ -50,12 +50,12 @@ def create_base_parser(
 
     Returns:
         ArgumentParser: Configured parser with base arguments
-        
+
     Example:
         ```python
         # Create parser for custom training script
         parser = create_base_parser("My custom training script")
-        
+
         # Parse arguments
         args = parser.parse_args([
             "--model_id", "microsoft/Florence-2-base-ft",
@@ -63,7 +63,7 @@ def create_base_parser(
             "--output_dir", "./checkpoints",
             "--config", "config.toml"
         ])
-        
+
         # Access parsed values
         print(f"Model: {args.model_id}")
         print(f"Dataset: {args.dataset}")
@@ -88,45 +88,45 @@ def create_base_parser(
 
 def create_florence_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._ArgumentGroup]]:
     """Create argument parser for Florence-2 training.
-    
+
     This function creates a complete ArgumentParser configured specifically for
     Florence-2 model training. It combines the base parser with model-specific
     argument groups for PEFT, training, optimization, and dataset configuration.
-    
+
     Florence-2 Specific Features:
         - Uses FLORENCE_TARGET_MODULES as default LoRA target modules
         - Optimized for vision-language model fine-tuning
         - Supports task-specific prompts like "<MORE_DETAILED_CAPTION>"
         - Configured for typical Florence-2 training patterns
-    
+
     Argument Groups Created:
         "peft": PEFT/LoRA configuration (rank, alpha, target_modules, etc.)
         "training": Core training parameters (learning rate, batch size, epochs)
         "opt": Optimizer and scheduler configuration
         "dataset": Dataset loading and processing options
-    
+
     Target Modules:
         Florence-2 uses specific target modules optimized for vision-language tasks.
         The default target modules are imported from caption_train.models.florence
         and include key attention and projection layers.
-    
+
     Common Usage:
         ```python
         parser, groups = create_florence_parser()
         args = parser.parse_args()
-        
+
         # Extract configuration objects
         configs = extract_config_objects(args, groups)
         training_config = configs["training"]
         peft_config = configs["peft"]
         ```
-    
+
     Integration with Training Pipeline:
         The parser is designed to work seamlessly with TrainingPipeline:
         ```python
         args, groups = parse_training_args("florence")
         configs = extract_config_objects(args, groups)
-        
+
         pipeline = create_training_pipeline("florence", args.model_id)
         pipeline.run_full_pipeline(
             training_config=configs["training"],
@@ -139,29 +139,29 @@ def create_florence_parser() -> tuple[argparse.ArgumentParser, dict[str, argpars
         ```
 
     Returns:
-        tuple[ArgumentParser, dict[str, ArgumentGroup]]: 
+        tuple[ArgumentParser, dict[str, ArgumentGroup]]:
             - parser: Complete ArgumentParser ready for parsing Florence-2 training args
             - groups_dict: Dictionary mapping group names to ArgumentGroup objects
                           Keys: "peft", "training", "opt", "dataset"
-                          
+
     Example:
         ```python
         # Create Florence-2 parser
         parser, groups = create_florence_parser()
-        
+
         # Parse typical Florence-2 training arguments
         args = parser.parse_args([
             "--model_id", "microsoft/Florence-2-base-ft",
-            "--dataset", "/path/to/images", 
+            "--dataset", "/path/to/images",
             "--output_dir", "./checkpoints",
             "--rank", "8",
-            "--alpha", "16", 
+            "--alpha", "16",
             "--learning_rate", "1e-4",
             "--batch_size", "4",
             "--epochs", "5",
             "--prompt", "<MORE_DETAILED_CAPTION>"
         ])
-        
+
         # Access Florence-2 specific arguments
         print(f"LoRA rank: {args.rank}")
         print(f"Task prompt: {args.prompt}")
@@ -190,42 +190,42 @@ def create_florence_parser() -> tuple[argparse.ArgumentParser, dict[str, argpars
 
 def create_git_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._ArgumentGroup]]:
     """Create argument parser for GIT model training.
-    
+
     This function creates a complete ArgumentParser configured specifically for
     GIT (GenerativeImage2Text) model training. It includes GIT-specific arguments
     and legacy argument aliases for backward compatibility.
-    
+
     GIT Model Specific Features:
         - Custom target modules for GIT's transformer architecture
         - Backward compatibility aliases (model_name_or_path, train_dir)
         - Image augmentation support for data preprocessing
         - Configurable sequence length (block_size)
         - LoRA quantization options (4, 8, 16 bit)
-    
+
     Target Modules:
         GIT uses attention mechanism target modules:
         - k_proj, v_proj, q_proj: Key, value, query projections
         - out_proj: Output projection
         - query, key, value: Additional attention components
-    
+
     Legacy Compatibility:
         Supports aliases for backward compatibility with existing scripts:
         - --model_name_or_path: Alias for --model_id
         - --train_dir: Alias for --dataset_dir
         These are handled by parse_training_args() automatically.
-    
+
     GIT-Specific Arguments:
         --augment_images: Enable image augmentations during training
         --block_size: Maximum sequence length (default: 2048)
         --lora_bits: Quantization bits for LoRA (4, 8, or 16)
         --model_name_or_path: Legacy alias for model_id
         --train_dir: Legacy alias for dataset directory
-    
+
     Usage Pattern:
         ```python
         parser, groups = create_git_parser()
         args = parser.parse_args()
-        
+
         # Legacy arguments are automatically mapped
         model_id = args.model_id or args.model_name_or_path
         dataset_path = args.dataset or args.train_dir
@@ -236,29 +236,29 @@ def create_git_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._Ar
             - parser: Complete ArgumentParser for GIT model training
             - groups_dict: Dictionary with argument groups
                           Keys: "peft", "training", "opt", "dataset"
-                          
+
     Example:
         ```python
         # Create GIT parser
         parser, groups = create_git_parser()
-        
+
         # Parse GIT training arguments (using legacy names)
         args = parser.parse_args([
             "--model_name_or_path", "microsoft/git-base",
             "--train_dir", "/path/to/images",
-            "--output_dir", "./checkpoints", 
+            "--output_dir", "./checkpoints",
             "--augment_images",
             "--block_size", "1024",
             "--lora_bits", "4",
             "--rank", "8",
             "--learning_rate", "2e-4"
         ])
-        
+
         # Access GIT-specific arguments
         print(f"Augmentation: {args.augment_images}")
         print(f"Block size: {args.block_size}")
         print(f"LoRA bits: {args.lora_bits}")
-        
+
         # Legacy arguments are available
         print(f"Model (legacy): {args.model_name_or_path}")
         print(f"Dataset (legacy): {args.train_dir}")
@@ -309,39 +309,39 @@ def create_git_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._Ar
 
 def create_blip_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._ArgumentGroup]]:
     """Create argument parser for BLIP model training.
-    
+
     This function creates a complete ArgumentParser configured specifically for
     BLIP (Bootstrapping Language-Image Pre-training) model training. It includes
     BLIP-specific optimization parameters and target modules.
-    
+
     BLIP Model Specific Features:
         - Custom target modules optimized for BLIP's architecture
         - Weight decay parameter for regularization
         - Support for both BlipForConditionalGeneration and AutoModelForVision2Seq
         - Optimized for image captioning and visual question answering tasks
-    
+
     Target Modules:
         BLIP uses specific target modules imported from caption_train.models.blip:
         - q_proj, v_proj, k_proj: Query, value, key projections
         - out_proj: Output projection layer
         - fc1, fc2: Feed-forward network layers
         These modules are carefully selected for BLIP's transformer architecture.
-    
+
     BLIP-Specific Arguments:
         --weight_decay: Weight decay for optimizer regularization (default: 1e-4)
                        BLIP models often benefit from moderate weight decay
-    
+
     Optimization Considerations:
         BLIP models typically require:
         - Moderate weight decay (1e-4) for stable training
         - Careful learning rate selection (often 1e-5 to 5e-5)
         - Appropriate batch size based on GPU memory (2-8 typical)
-    
+
     Usage with Training Pipeline:
         ```python
         args, groups = parse_training_args("blip")
         configs = extract_config_objects(args, groups)
-        
+
         pipeline = create_training_pipeline("blip", args.model_id)
         # Weight decay is automatically handled by optimizer config
         ```
@@ -351,12 +351,12 @@ def create_blip_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._A
             - parser: Complete ArgumentParser for BLIP model training
             - groups_dict: Dictionary with argument groups
                           Keys: "peft", "training", "opt", "dataset"
-                          
+
     Example:
         ```python
         # Create BLIP parser
         parser, groups = create_blip_parser()
-        
+
         # Parse BLIP training arguments
         args = parser.parse_args([
             "--model_id", "Salesforce/blip-image-captioning-base",
@@ -369,11 +369,11 @@ def create_blip_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse._A
             "--batch_size", "4",
             "--epochs", "3"
         ])
-        
+
         # Access BLIP-specific arguments
         print(f"Weight decay: {args.weight_decay}")
         print(f"Target modules: {args.target_modules}")
-        
+
         # Extract configs for training
         configs = extract_config_objects(args, groups)
         optimizer_config = configs["optimizer"]
@@ -407,35 +407,35 @@ def parse_training_args(
     model_type: str = "florence", args: list[str] | None = None
 ) -> tuple[argparse.Namespace, dict[str, argparse._ArgumentGroup]]:
     """Parse training arguments for a specific model type.
-    
+
     This is the main entry point for parsing command-line arguments in training
     scripts. It automatically selects the appropriate parser based on model type,
     handles legacy argument aliases, merges configuration files, and returns
     both parsed arguments and argument groups for further processing.
-    
+
     Supported Model Types:
         "florence": Florence-2 vision-language models
-        "git": GIT (GenerativeImage2Text) models  
+        "git": GIT (GenerativeImage2Text) models
         "blip": BLIP (Bootstrapping Language-Image Pre-training) models
-    
+
     Automatic Processing:
         1. Creates model-specific parser using create_*_parser()
         2. Parses command-line arguments
         3. Handles legacy argument aliases for backward compatibility
         4. Merges TOML configuration file if --config is provided
         5. Returns parsed arguments and groups for config object extraction
-    
+
     Legacy Argument Handling:
         Automatically maps legacy argument names to current names:
         - model_name_or_path → model_id
         - train_dir → dataset_dir
         This ensures backward compatibility with existing training scripts.
-    
+
     Configuration File Integration:
         If --config is provided, the TOML configuration file is automatically
         loaded and merged with command-line arguments. CLI arguments take
         precedence over config file values.
-    
+
     Integration with extract_config_objects():
         The returned argument groups are designed to work with extract_config_objects()
         to create strongly-typed configuration objects:
@@ -443,7 +443,7 @@ def parse_training_args(
         args, groups = parse_training_args("florence")
         configs = extract_config_objects(args, groups)
         ```
-    
+
     Error Handling:
         - Raises ValueError for unsupported model types
         - Argument parsing errors are handled by argparse (exits with error message)
@@ -463,28 +463,28 @@ def parse_training_args(
                           Includes legacy argument mapping and config file merging
             - argument_groups: Dictionary mapping group names to ArgumentGroup objects
                               Used by extract_config_objects() to create config objects
-                              
+
     Raises:
         ValueError: If model_type is not supported
-        
+
     Example:
         ```python
         # Parse Florence-2 arguments from command line
         args, groups = parse_training_args("florence")
-        
+
         # Parse specific arguments (useful for testing)
         test_args = ["--model_id", "microsoft/Florence-2-base-ft", "--epochs", "5"]
         args, groups = parse_training_args("florence", test_args)
-        
+
         # Access parsed arguments
         print(f"Model ID: {args.model_id}")
         print(f"Epochs: {args.epochs}")
-        
+
         # Create configuration objects
         configs = extract_config_objects(args, groups)
         training_config = configs["training"]
         peft_config = configs["peft"]
-        
+
         # Use with training pipeline
         pipeline = create_training_pipeline("florence", args.model_id)
         pipeline.run_full_pipeline(
@@ -496,7 +496,7 @@ def parse_training_args(
             dataset_path=args.dataset
         )
         ```
-        
+
     Legacy Compatibility Example:
         ```python
         # These legacy arguments are automatically mapped
@@ -505,9 +505,9 @@ def parse_training_args(
             "--train_dir", "/path/to/data",                 # → dataset_dir
             "--output_dir", "./checkpoints"
         ]
-        
+
         args, groups = parse_training_args("git", legacy_args)
-        
+
         # Both legacy and new names are available
         assert args.model_id == "microsoft/git-base"
         assert args.model_name_or_path == "microsoft/git-base"
@@ -544,26 +544,26 @@ def parse_training_args(
 
 def extract_config_objects(args: argparse.Namespace, groups: dict[str, argparse._ArgumentGroup]) -> dict[str, Any]:
     """Extract configuration objects from parsed arguments and argument groups.
-    
+
     This function takes parsed command-line arguments and their corresponding
     argument groups, then creates strongly-typed configuration objects for
     different aspects of training (training params, PEFT, optimizer, dataset).
-    
+
     The function uses the `get_group_args` utility from `caption_train.util` to
     extract only the arguments that belong to each specific group, then creates
     the appropriate configuration dataclass instance.
-    
+
     Argument Group Mapping:
         "training" -> TrainingConfig: Core training parameters (LR, batch size, etc.)
         "peft" -> PeftConfig: LoRA/PEFT parameters (rank, alpha, target modules)
         "opt" -> OptimizerConfig: Optimizer and scheduler configuration
         "dataset" -> FileConfig: Dataset loading and file handling configuration
-    
+
     Dependencies:
         - Imports TrainingConfig, PeftConfig, OptimizerConfig, FileConfig from caption_train.trainer
         - Uses get_group_args from caption_train.util to extract group-specific arguments
         - Requires that all configuration classes have matching field names to argument names
-    
+
     Error Handling:
         - Missing required arguments will cause TypeError when creating config objects
         - Invalid argument types will cause TypeError during dataclass instantiation
@@ -578,21 +578,21 @@ def extract_config_objects(args: argparse.Namespace, groups: dict[str, argparse.
         Dictionary mapping configuration type names to config object instances:
         {
             "training": TrainingConfig(...),     # if "training" group exists
-            "peft": PeftConfig(...),             # if "peft" group exists  
+            "peft": PeftConfig(...),             # if "peft" group exists
             "optimizer": OptimizerConfig(...),   # if "opt" group exists
             "dataset": FileConfig(...),          # if "dataset" group exists
         }
-        
+
     Example:
         ```python
         # Typical usage via parse_training_args
         args, groups = parse_training_args("florence", ["--epochs", "5", "--batch_size", "4"])
         configs = extract_config_objects(args, groups)
-        
+
         # Access specific configurations
         training_config = configs["training"]  # TrainingConfig instance
         peft_config = configs["peft"]          # PeftConfig instance
-        
+
         # Use with training pipeline
         pipeline = create_training_pipeline("florence", "microsoft/Florence-2-base-ft")
         pipeline.run_full_pipeline(
@@ -723,39 +723,39 @@ def create_inference_parser() -> argparse.ArgumentParser:
 
 def validate_training_args(args: argparse.Namespace) -> None:
     """Validate training arguments and raise errors for invalid combinations.
-    
+
     This function performs comprehensive validation of parsed arguments to catch
     common errors early and provide helpful error messages. It checks for:
     - Required argument presence
-    - File/directory existence 
+    - File/directory existence
     - Valid parameter ranges
     - Logical argument combinations
-    
+
     Validation Rules:
         1. Dataset Requirements: Either `dataset` OR `dataset_dir` must be provided
            - Only checked if these attributes exist on the args object
            - Supports both None values and missing attributes gracefully
-        
+
         2. Path Existence: If provided, dataset paths must exist
            - `dataset`: Must be a valid file path
            - `dataset_dir`: Must be a valid directory path
-           
+
         3. Parameter Ranges:
            - `learning_rate`: Must be positive (> 0)
-           - `batch_size`: Must be positive (> 0) 
+           - `batch_size`: Must be positive (> 0)
            - `epochs`: Must be positive (> 0)
-    
+
     Usage Patterns:
         # Called automatically by parse_training_args()
         args, groups = parse_training_args("florence")
         # validation happens here automatically
-        
+
         # Manual validation for custom argument parsing
-        parser = argparse.ArgumentParser() 
+        parser = argparse.ArgumentParser()
         # ... add arguments ...
         args = parser.parse_args()
         validate_training_args(args)  # Explicit validation
-    
+
     Common Validation Errors:
         - "Either --dataset or --dataset_dir must be provided"
         - "Dataset path does not exist: /path/to/file"
@@ -770,7 +770,7 @@ def validate_training_args(args: argparse.Namespace) -> None:
 
     Raises:
         ValueError: If validation fails with descriptive error message
-        
+
     Example:
         ```python
         # This will pass validation
@@ -782,7 +782,7 @@ def validate_training_args(args: argparse.Namespace) -> None:
             epochs=5
         )
         validate_training_args(args)  # No exception
-        
+
         # This will raise ValueError
         args = Namespace(dataset=None, dataset_dir=None)
         validate_training_args(args)  # ValueError: Either --dataset or --dataset_dir must be provided
@@ -798,7 +798,7 @@ def validate_training_args(args: argparse.Namespace) -> None:
     # Check that either dataset or dataset_dir is provided (only if they are attributes)
     if hasattr(args, "dataset") or hasattr(args, "dataset_dir"):
         dataset = getattr(args, "dataset", None)
-        dataset_dir = getattr(args, "dataset_dir", None) 
+        dataset_dir = getattr(args, "dataset_dir", None)
         if not (dataset or dataset_dir):
             raise ValueError("Either --dataset or --dataset_dir must be provided")
 

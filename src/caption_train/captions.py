@@ -65,25 +65,25 @@ def setup_metadata(output, captions):
 
 def shuffle_caption(text, shuffle_on=", ", frozen_parts=1, dropout=0.0):
     """Shuffle and randomly drop parts of a caption for data augmentation.
-    
+
     This function provides caption-level data augmentation by shuffling
     comma-separated parts while optionally keeping some parts fixed and
     randomly dropping others. This technique helps models learn more robust
     representations by seeing varied caption structures during training.
-    
+
     Augmentation Process:
         1. Split caption into parts using the separator (default: ", ")
         2. Keep first N parts frozen in their original positions
         3. Apply dropout to remaining parts (randomly remove some)
         4. Shuffle the remaining parts randomly
         5. Recombine frozen + shuffled parts
-    
+
     Data Augmentation Benefits:
         - Reduces overfitting to specific caption structures
         - Helps models focus on important concepts rather than word order
         - Increases effective dataset size through variation
         - Particularly useful for vision-language model training
-    
+
     Args:
         text: Original caption text to augment
              Example: "A red car, parked on street, sunny day, blue sky"
@@ -96,45 +96,45 @@ def shuffle_caption(text, shuffle_on=", ", frozen_parts=1, dropout=0.0):
         dropout: Probability of dropping each non-frozen part (0.0-1.0)
                 Defaults to 0.0 (no dropout)
                 Example: 0.2 means 20% chance to drop each part
-    
+
     Returns:
         str: Augmented caption with shuffled/dropped parts
              Maintains original separator between parts
-             
+
     Examples:
         ```python
         # Basic shuffling (keep first part, shuffle rest)
         original = "A red car, parked on street, sunny day, blue sky"
         result = shuffle_caption(original)
         # Possible result: "A red car, blue sky, sunny day, parked on street"
-        
+
         # With dropout (randomly remove some parts)
         result = shuffle_caption(original, dropout=0.3)
         # Possible result: "A red car, sunny day, blue sky"  # "parked on street" dropped
-        
+
         # Shuffle all parts (no frozen parts)
         result = shuffle_caption(original, frozen_parts=0)
         # Possible result: "sunny day, A red car, blue sky, parked on street"
-        
+
         # Different separator (sentence-level)
         text = "The car is red. It is parked outside. The weather is sunny."
         result = shuffle_caption(text, shuffle_on=". ", frozen_parts=1)
         # Possible result: "The car is red. The weather is sunny. It is parked outside."
         ```
-    
+
     Training Integration:
         ```python
         # Use during dataset processing
         def augment_caption(caption):
             if random.random() < 0.5:  # 50% chance to augment
                 return shuffle_caption(
-                    caption, 
+                    caption,
                     frozen_parts=1,  # Keep main subject
                     dropout=0.1      # Light dropout
                 )
             return caption
         ```
-    
+
     Note:
         This function modifies the internal parts list during processing.
         Each call with the same input may produce different results due

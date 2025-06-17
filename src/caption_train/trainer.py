@@ -16,10 +16,10 @@ from caption_train.datasets import Datasets
 @dataclass
 class TrainingConfig:
     """Configuration for training parameters.
-    
+
     This class holds all training-specific parameters used during model fine-tuning.
     All fields are required unless explicitly marked as optional (with | None).
-    
+
     Core Training Parameters:
         dropout: LoRA dropout rate (0.0-1.0, typically 0.1-0.25)
         learning_rate: Learning rate for optimizer (typically 1e-4 to 1e-5)
@@ -27,19 +27,19 @@ class TrainingConfig:
         epochs: Number of training epochs
         gradient_accumulation_steps: Steps to accumulate before optimizer update
         gradient_checkpointing: Whether to use gradient checkpointing (saves memory)
-    
+
     Model Configuration:
         model_id: HuggingFace model identifier (e.g., "microsoft/Florence-2-base-ft")
         device: Device to train on ("cuda", "cpu", or specific device like "cuda:0")
         quantize: Whether to use 4-bit quantization to reduce memory usage
         max_length: Maximum sequence length (None uses model default)
-    
+
     Caption Processing:
         shuffle_captions: Whether to shuffle comma-separated caption parts
         frozen_parts: Number of caption parts to keep fixed during shuffling
         caption_dropout: Probability of dropping caption parts (0.0-1.0)
         prompt: Task-specific prompt (e.g., "<MORE_DETAILED_CAPTION>" for Florence-2)
-    
+
     Logging and Checkpointing:
         log_with: Logging backend ("wandb", "tensorboard", or None)
         name: Experiment name for logging and checkpoints
@@ -48,7 +48,7 @@ class TrainingConfig:
         sample_every_n_steps: Sample outputs every N steps (None to disable)
         save_every_n_epochs: Save checkpoint every N epochs (None to disable)
         save_every_n_steps: Save checkpoint every N steps (None to disable)
-    
+
     Example:
         ```python
         config = TrainingConfig(
@@ -76,6 +76,7 @@ class TrainingConfig:
         )
         ```
     """
+
     dropout: float
     learning_rate: float
     batch_size: int
@@ -102,23 +103,23 @@ class TrainingConfig:
 @dataclass
 class PeftConfig:
     """Configuration for Parameter Efficient Fine-Tuning (PEFT) using LoRA.
-    
+
     This class configures LoRA (Low-Rank Adaptation) parameters for efficient fine-tuning
     of large vision-language models. LoRA adds trainable low-rank matrices to model layers
     while keeping the original weights frozen.
-    
+
     LoRA Parameters:
         rank: LoRA rank/dimension (typically 4-64, higher = more parameters but better capacity)
         alpha: LoRA scaling factor (typically rank * 2, controls learning rate scaling)
         rslora: Whether to use RS-LoRA scaling (scales alpha by sqrt(rank))
         init_lora_weights: Weight initialization strategy
-    
+
     Target Configuration:
         target_modules: Which model modules to apply LoRA to. Can be:
             - list[str]: Specific module names ["q_proj", "v_proj", "k_proj"]
-            - str: Space-separated names "q_proj v_proj k_proj"  
+            - str: Space-separated names "q_proj v_proj k_proj"
             - None: Use model-specific defaults
-    
+
     Weight Initialization Options:
         - "gaussian": Random Gaussian initialization (default, stable)
         - "eva": EVA initialization (can improve convergence)
@@ -126,18 +127,18 @@ class PeftConfig:
         - "pissa": PISSA initialization method
         - "pissa_niter_[N]": PISSA with N iterations (e.g., "pissa_niter_4")
         - "loftq": LoFTQ initialization for quantized models
-    
+
     Common Configurations by Model:
         Florence-2: rank=8, alpha=16, target_modules=["qkv", "proj", "fc1", "fc2"]
         BLIP: rank=8, alpha=16, target_modules=["q_proj", "v_proj", "k_proj", "out_proj"]
         GIT: rank=8, alpha=16, target_modules=["k_proj", "v_proj", "q_proj", "out_proj"]
-    
+
     Memory and Performance Trade-offs:
         - Higher rank: More parameters, better capacity, more memory
         - Lower rank: Fewer parameters, faster training, less memory
         - More target_modules: Better coverage, more parameters
         - Fewer target_modules: Faster training, may limit adaptation
-    
+
     Example:
         ```python
         # Basic LoRA config
@@ -148,7 +149,7 @@ class PeftConfig:
             target_modules=["q_proj", "v_proj", "k_proj", "out_proj"],
             init_lora_weights="gaussian"
         )
-        
+
         # High-capacity config for complex tasks
         config = PeftConfig(
             rank=32,
@@ -159,6 +160,7 @@ class PeftConfig:
         )
         ```
     """
+
     rank: int
     alpha: int
     rslora: bool
@@ -169,26 +171,26 @@ class PeftConfig:
 @dataclass
 class OptimizerConfig:
     """Configuration for optimizer and advanced training techniques.
-    
+
     This class configures the optimizer, learning rate scheduler, and advanced
     optimization techniques like low-rank optimization and LoRA+.
-    
+
     Core Optimizer Settings:
         optimizer_name: Optimizer type ("AdamW", "DAdaptAdam", "Prodigy", etc.)
         optimizer_args: Additional optimizer arguments (e.g., {"weight_decay": 0.01})
         scheduler: Learning rate scheduler ("OneCycle", "linear", "cosine", None)
-    
+
     Advanced Optimization (Optional):
         accumulation_rank: Rank for low-rank gradient accumulation (None to disable)
         activation_checkpointing: Whether to use activation checkpointing (None = auto)
-        optimizer_rank: Rank for low-rank optimizer states (None to disable) 
+        optimizer_rank: Rank for low-rank optimizer states (None to disable)
         lora_plus_ratio: LoRA+ learning rate ratio for B matrices (None to disable)
-    
+
     Common Optimizer Configurations:
         - AdamW: Most common, stable, good default choice
         - DAdaptAdam: Adaptive learning rate, requires no LR tuning
         - Prodigy: Advanced adaptive optimizer with better convergence
-    
+
     Example:
         ```python
         # Basic AdamW config
@@ -201,12 +203,12 @@ class OptimizerConfig:
             optimizer_rank=None,
             lora_plus_ratio=None,
         )
-        
+
         # Advanced config with LoRA+ and low-rank optimization
         config = OptimizerConfig(
             optimizer_name="Prodigy",
             optimizer_args={"weight_decay": 0.01},
-            scheduler="OneCycle", 
+            scheduler="OneCycle",
             accumulation_rank=8,
             activation_checkpointing=True,
             optimizer_rank=16,
@@ -214,6 +216,7 @@ class OptimizerConfig:
         )
         ```
     """
+
     optimizer_args: dict
     optimizer_name: str
     scheduler: str
@@ -226,35 +229,36 @@ class OptimizerConfig:
 @dataclass
 class LoraFileConfig:
     """Simple configuration for LoRA model output directory.
-    
+
     Args:
         output_dir: Directory where trained LoRA weights will be saved
     """
+
     output_dir: Path
 
 
 @dataclass
 class FileConfig:
     """Configuration for dataset loading and file handling.
-    
+
     This class configures how datasets are loaded, processed, and where files
     are read from. It supports both directory-based datasets (image/caption pairs)
     and single dataset files (JSONL, etc.).
-    
+
     Dataset Sources (choose one):
         dataset_dir: Directory containing image/caption pairs (e.g., img.jpg + img.txt)
         dataset: Single dataset file (JSONL, parquet, etc.) or HuggingFace dataset name
-    
+
     Caption File Configuration:
         combined_suffix: Suffix for combined caption files (e.g., "_combined")
-        generated_suffix: Suffix for generated caption files (e.g., "_generated") 
+        generated_suffix: Suffix for generated caption files (e.g., "_generated")
         caption_file_suffix: Suffix for caption files (e.g., ".txt", default "")
-    
+
     Processing Options:
         recursive: Whether to search subdirectories for image/caption pairs
         num_workers: Number of workers for data loading (0 = single-threaded)
         debug_dataset: Whether to print debug info about dataset loading
-    
+
     Dataset Directory Structure Example:
         ```
         dataset_dir/
@@ -268,7 +272,7 @@ class FileConfig:
             ├── image3.jpg
             └── image3.txt
         ```
-    
+
     Example:
         ```python
         # Directory-based dataset
@@ -276,13 +280,13 @@ class FileConfig:
             dataset_dir=Path("/path/to/images"),
             dataset=None,
             combined_suffix="_combined",
-            generated_suffix="_generated", 
+            generated_suffix="_generated",
             caption_file_suffix="",
             recursive=True,
             num_workers=4,
             debug_dataset=False,
         )
-        
+
         # Single dataset file
         config = FileConfig(
             dataset_dir=None,
@@ -294,7 +298,7 @@ class FileConfig:
             num_workers=4,
             debug_dataset=False,
         )
-        
+
         # HuggingFace dataset
         config = FileConfig(
             dataset_dir=None,
@@ -308,6 +312,7 @@ class FileConfig:
         )
         ```
     """
+
     dataset_dir: Path | None
     dataset: Path | None
     combined_suffix: str | None

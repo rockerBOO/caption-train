@@ -1,6 +1,7 @@
 import asyncio
 from websockets import serve
 
+
 def send_and_wait_for_response(websocket, message):
     req = dict(
         req_from="trainer",
