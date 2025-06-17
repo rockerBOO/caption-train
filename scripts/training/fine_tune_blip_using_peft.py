@@ -11,7 +11,6 @@ from pathlib import Path
 
 from caption_train.training.pipeline import create_training_pipeline
 from caption_train.trainer import TrainingConfig, PeftConfig, OptimizerConfig, FileConfig
-from caption_train.models.blip import BLIP_TARGET_MODULES
 
 
 def create_finetune_parser() -> argparse.ArgumentParser:
