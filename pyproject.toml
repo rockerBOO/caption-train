@@ -3,7 +3,7 @@ name = "caption-train"
 version = "0.1.0"
 description = "Caption trainer using models like Florence 2"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "accelerate>=1.2.1",
   "numpy<2",
@@ -16,17 +16,27 @@ dependencies = [
   "prodigyopt>=1.1.1",
   "pytest>=8.3.4",
   "python-dotenv>=1.0.1",
-  "transformers>=4.48.0",
+  "transformers<4.50.0",
   "wandb>=0.19.3",
   "timm>=1.0.13",
   "datasets>=3.3.2",
+  "flora-opt>=0.0.3",
+  "openai>=1.64.0",
+  "autoawq>=0.2.7.post3",
+  "janus",
+  "qwen-vl-utils[decord]==0.0.8",
+  "setuptools>=78.1.0",
+  "sentence-transformers>=4.1.0",
+  "scikit-learn>=1.6.1",
 ]
 
 [project.optional-dependencies]
-janus = [
-  "janus",
+decord = [
+    "decord",
 ]
 server = [
+  "flask",
+  "uvicorn",
   "fastapi[standard]>=0.115.8",
   "gradio>=5.18.0",
 ]
@@ -37,6 +47,11 @@ onnx = [
   "onnxruntime-gpu>=1.20.1",
 ]
 cpu = [
+  "torch>=2.6.0",
+  "torchvision>=0.21.0",
+]
+cu126 = [
+  # "bitsandbytes>=0.45.3",
   "torch>=2.6.0",
   "torchvision>=0.21.0",
 ]
@@ -60,6 +75,7 @@ flash-attn = [
 [dependency-groups]
 dev = [
   "caption-train",
+  "pytest>=8.3.4",
   "ruff>=0.9.7",
 ]
 
@@ -69,6 +85,7 @@ conflicts = [
     { extra = "cpu" },
     { extra = "cu121" },
     { extra = "cu124" },
+    { extra = "cu126" },
   ],
 ]
 
@@ -77,11 +94,13 @@ torch = [
   { index = "pytorch-cpu", extra = "cpu" },
   { index = "pytorch-cu121", extra = "cu121" },
   { index = "pytorch-cu124", extra = "cu124" },
+  { index = "pytorch-cu126", extra = "cu126" },
 ]
 torchvision = [
   { index = "pytorch-cpu", extra = "cpu" },
   { index = "pytorch-cu121", extra = "cu121" },
   { index = "pytorch-cu124", extra = "cu124" },
+  { index = "pytorch-cu126", extra = "cu126" },
 ]
 janus = { git = "https://github.com/deepseek-ai/Janus.git" }
 caption-train = { workspace = true }
@@ -101,6 +120,11 @@ name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
 [tool.ruff]
 line-length = 120
 
@@ -108,7 +132,7 @@ line-length = 120
 ignore = ["E501"]
 
 [tool.pytest]
-testpaths = ["caption_train/tests"]
+testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
@@ -122,3 +146,15 @@ pythonpath = [
   ".",
 ]
 minversion = "6.0"
+
+[tool.setuptools.packages.find]
+where = [
+    "src"
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,7 +1,6 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 import json
 from pathlib import Path
-import os
 from urllib.parse import unquote
 
 
@@ -21,7 +20,7 @@ class SubHTTPServer(HTTPServer):
 
 
 def run(localpath, server_class=HTTPServer, handler_class=BaseHTTPRequestHandler):
-    server_address = ("", 8000)
+    server_address = ("", 8123)
     httpd = server_class(
         localpath,
         "/img",

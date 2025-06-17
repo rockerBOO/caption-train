@@ -1,7 +1,6 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 import json
 from pathlib import Path
-import os
 from urllib.parse import unquote
 from io import BytesIO
 
