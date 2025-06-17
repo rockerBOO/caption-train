@@ -16,108 +16,44 @@ from caption_train.models.blip import BLIP_TARGET_MODULES
 
 def create_train3_parser() -> argparse.ArgumentParser:
     """Create argument parser compatible with train3.py script."""
-    parser = argparse.ArgumentParser(
-        description="Train BLIP model on external datasets (e.g., football dataset)"
-    )
-    
+    parser = argparse.ArgumentParser(description="Train BLIP model on external datasets (e.g., football dataset)")
+
     # Model arguments
     parser.add_argument(
-        "--model_id",
-        default="Salesforce/blip-image-captioning-base",
-        help="HuggingFace model identifier"
+        "--model_id", default="Salesforce/blip-image-captioning-base", help="HuggingFace model identifier"
     )
-    
+
     # Training arguments
     parser.add_argument(
-        "--output_dir",
-        type=Path,
-        default="./training/caption",
-        help="Directory to save the trained model"
+        "--output_dir", type=Path, default="./training/caption", help="Directory to save the trained model"
     )
-    
-    parser.add_argument(
-        "--dataset_name",
-        default="ybelkada/football-dataset",
-        help="HuggingFace dataset name"
-    )
-    
-    parser.add_argument(
-        "--split",
-        default="train",
-        help="Dataset split to use"
-    )
-    
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=1e-3,
-        help="Learning rate for training"
-    )
-    
-    parser.add_argument(
-        "--weight_decay",
-        type=float,
-        default=1e-4,
-        help="Weight decay for optimizer"
-    )
-    
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=2,
-        help="Batch size for training"
-    )
-    
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=5,
-        help="Number of epochs to train"
-    )
-    
-    parser.add_argument(
-        "--sample_every_n_steps",
-        type=int,
-        default=10,
-        help="Sample model output every n steps"
-    )
-    
+
+    parser.add_argument("--dataset_name", default="ybelkada/football-dataset", help="HuggingFace dataset name")
+
+    parser.add_argument("--split", default="train", help="Dataset split to use")
+
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for training")
+
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay for optimizer")
+
+    parser.add_argument("--batch_size", type=int, default=2, help="Batch size for training")
+
+    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs to train")
+
+    parser.add_argument("--sample_every_n_steps", type=int, default=10, help="Sample model output every n steps")
+
     # LoRA arguments
-    parser.add_argument(
-        "--rank",
-        type=int,
-        default=16,
-        help="LoRA rank"
-    )
-    
-    parser.add_argument(
-        "--alpha",
-        type=float,
-        default=32,
-        help="LoRA alpha"
-    )
-    
-    parser.add_argument(
-        "--dropout",
-        type=float,
-        default=0.05,
-        help="LoRA dropout"
-    )
-    
+    parser.add_argument("--rank", type=int, default=16, help="LoRA rank")
+
+    parser.add_argument("--alpha", type=float, default=32, help="LoRA alpha")
+
+    parser.add_argument("--dropout", type=float, default=0.05, help="LoRA dropout")
+
     # Device arguments
-    parser.add_argument(
-        "--device",
-        default="cuda",
-        help="Device to train on (cuda/cpu)"
-    )
-    
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed"
-    )
-    
+    parser.add_argument("--device", default="cuda", help="Device to train on (cuda/cpu)")
+
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
     return parser
 
 
@@ -126,9 +62,9 @@ def main():
     # Parse arguments
     parser = create_train3_parser()
     args = parser.parse_args()
-    
+
     # Create a mock args object that matches what our refactored utilities expect
-    refactored_args = type('Args', (), {})()
+    refactored_args = type("Args", (), {})()
     refactored_args.model_id = args.model_id
     refactored_args.dataset = args.dataset_name
     refactored_args.output_dir = args.output_dir
@@ -164,7 +100,7 @@ def main():
     refactored_args.init_lora_weights = "gaussian"
     refactored_args.optimizer_name = "AdamW"
     refactored_args.optimizer_args = {"weight_decay": args.weight_decay}
-    
+
     # Create configurations
     training_config = TrainingConfig(
         dropout=args.dropout,
@@ -187,17 +123,13 @@ def main():
         sample_every_n_epochs=None,
         sample_every_n_steps=args.sample_every_n_steps,
         save_every_n_epochs=None,
-        save_every_n_steps=None
+        save_every_n_steps=None,
     )
-    
+
     peft_config = PeftConfig(
-        rank=args.rank,
-        alpha=args.alpha,
-        rslora=False,
-        target_modules=BLIP_TARGET_MODULES,
-        init_lora_weights="gaussian"
+        rank=args.rank, alpha=args.alpha, rslora=False, target_modules=BLIP_TARGET_MODULES, init_lora_weights="gaussian"
     )
-    
+
     optimizer_config = OptimizerConfig(
         optimizer_args={"weight_decay": args.weight_decay},
         optimizer_name="AdamW",
@@ -205,9 +137,9 @@ def main():
         accumulation_rank=None,
         activation_checkpointing=None,
         optimizer_rank=None,
-        lora_plus_ratio=None
+        lora_plus_ratio=None,
     )
-    
+
     dataset_config = FileConfig(
         dataset_dir=None,
         dataset=args.dataset_name,
@@ -216,16 +148,13 @@ def main():
         caption_file_suffix=None,
         recursive=True,
         num_workers=0,
-        debug_dataset=False
+        debug_dataset=False,
     )
     dataset_config.output_dir = args.output_dir
-    
+
     # Create and run the training pipeline
-    pipeline = create_training_pipeline(
-        model_type="blip",
-        model_id=args.model_id
-    )
-    
+    pipeline = create_training_pipeline(model_type="blip", model_id=args.model_id)
+
     print("Starting BLIP model training on external dataset with refactored pipeline...")
     print(f"Model ID: {args.model_id}")
     print(f"Dataset: {args.dataset_name} (split: {args.split})")
@@ -237,7 +166,7 @@ def main():
     print(f"LoRA alpha: {args.alpha}")
     print(f"Weight decay: {args.weight_decay}")
     print(f"Sample every {args.sample_every_n_steps} steps")
-    
+
     # Run the complete training pipeline
     pipeline.run_full_pipeline(
         training_config=training_config,
@@ -245,9 +174,9 @@ def main():
         optimizer_config=optimizer_config,
         dataset_config=dataset_config,
         args=refactored_args,
-        dataset_path=Path(args.dataset_name)  # For external datasets, use the dataset name
+        dataset_path=Path(args.dataset_name),  # For external datasets, use the dataset name
     )
-    
+
     print(f"Training completed successfully! Model saved to {args.output_dir}")
 
 
