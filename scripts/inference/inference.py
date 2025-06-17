@@ -13,7 +13,7 @@ from accelerate import Accelerator
 from transformers import AutoProcessor
 from peft import PeftModel
 
-from caption_train.inference.sampling import sample_with_prompts, evaluate_sample_batch
+from caption_train.inference.sampling import sample_with_prompts
 from caption_train.utils.arguments import create_inference_parser
 
 

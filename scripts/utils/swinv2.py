@@ -62,7 +62,7 @@ def load_tag_mapping(csv_path):
     tag_mapping = {}
     with open(csv_path, newline="", encoding="utf-8") as csvfile:
         reader = csv.reader(csvfile)
-        header = next(reader, None)  # Skip header
+        next(reader, None)  # Skip header
         for i, row in enumerate(reader):
             if row:
                 # Use the 'name' and 'category' fields.

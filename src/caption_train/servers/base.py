@@ -1,6 +1,6 @@
 """Base server application classes for caption-train."""
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict, Any
 
@@ -115,7 +115,7 @@ class ImageGalleryServer(CaptionServerApp):
         """
         Register routes for the image gallery server.
         """
-        from fastapi import APIRouter, UploadFile, File
+        from fastapi import APIRouter
         from pathlib import Path
         
         router = APIRouter()

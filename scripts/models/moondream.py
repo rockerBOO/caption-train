@@ -5,7 +5,7 @@ import math
 import torch
 
 # from peft import prepare_model_for_kbit_training
-from transformers import BitsAndBytesConfig
+# from transformers import BitsAndBytesConfig (unused)
 from einops import rearrange
 from peft import LoraConfig, get_peft_model
 from PIL import Image
@@ -59,12 +59,8 @@ def main(args):
     model_id = "/home/rockerboo/code/others/moondream2"
     revision = "2024-04-02"
 
-    quantized_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.float16,
-    )
+    # Quantization configuration (currently unused)
+    # quantized_config = BitsAndBytesConfig(...)
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         # local_files_only=True,
@@ -118,7 +114,6 @@ def main(args):
 def train(model, tokenizer, args):
     image_paths = []
 
-    device = args.device
     epochs = args.epochs or 5
     dtype = torch.float16
     lr = 3e-5

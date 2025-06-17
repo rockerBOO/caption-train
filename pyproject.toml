@@ -127,6 +127,10 @@ explicit = true
 
 [tool.ruff]
 line-length = 120
+exclude = [
+    "florence/",
+    "moondream/"
+]
 
 [tool.ruff.lint]
 ignore = ["E501"]

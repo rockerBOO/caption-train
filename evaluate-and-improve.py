@@ -37,9 +37,8 @@ def main(args: argparse.Namespace, dataset_config: FileConfig):
     # parser.add_argument("--caption", type=str, required=True, help="Initial caption for the image")
     # args = parser.parse_args()
 
-    # Setup accelerator and device
+    # Setup accelerator
     accelerator = Accelerator()
-    device = accelerator.device
 
     model_id = "Qwen/Qwen2.5-VL-3B-Instruct-AWQ"
     # Load model and processor

@@ -23,7 +23,8 @@ def main(args):
         for item in captions:
             f.write(json.dumps(item) + "\n")
 
-    ds = load_dataset(
+    # Loading dataset (not used)
+    load_dataset(
         "imagefolder",
         data_dir=args.dataset_dir,
         split="train",

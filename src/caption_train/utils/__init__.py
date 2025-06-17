@@ -1,3 +1,3 @@
 """Utility functions for caption-train library."""
 
-from . import server
+from . import server as server
