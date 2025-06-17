@@ -37,7 +37,7 @@ decord = [
 server = [
   "flask",
   "uvicorn",
-  "fastapi[standard]>=0.115.8",
+  "fastapi[standard]>=0.115.12",
   "gradio>=5.18.0",
 ]
 gpu_metrics = [

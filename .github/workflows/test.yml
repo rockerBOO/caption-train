@@ -1,16 +1,17 @@
 name: Test
-permissions: read-all
 
 on:
   push:
     branches:
       - main
+      - enhance-captions
     paths:
       - "**/*.py"
       - ".github/**"
   pull_request:
     branches:
       - main
+      - enhance-captions
     paths:
       - "**/*.py"
       - ".github/**"
@@ -35,7 +36,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install the project
-        run: uv sync --frozen --extra llm --extra cpu --dev
+        run: uv sync --frozen --extra llm --extra cpu --extra server --dev
 
       - name: Run ruff linting
         run: |
