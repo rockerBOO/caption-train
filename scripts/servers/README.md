@@ -5,6 +5,7 @@ This directory contains web servers and API endpoints for deploying trained mode
 ## Web Servers
 
 ### `server.py`
+
 **Purpose**: General-purpose web API for caption generation
 
 ```bash
@@ -23,11 +24,13 @@ uv run python scripts/servers/server.py \
 ```
 
 **API Endpoints**:
+
 - `POST /caption`: Generate caption for uploaded image
 - `GET /health`: Health check endpoint
 - `GET /model_info`: Model information and capabilities
 
 **Example Usage**:
+
 ```bash
 # Upload image for captioning
 curl -X POST -F "image=@image.jpg" http://localhost:8000/caption
@@ -41,6 +44,7 @@ curl -X POST -F "image=@image.jpg" http://localhost:8000/caption
 ```
 
 ### `florence-2-server.py`
+
 **Purpose**: Specialized server for Florence-2 models with advanced features
 
 ```bash
@@ -59,18 +63,21 @@ uv run python scripts/servers/florence-2-server.py \
 ```
 
 **Florence-2 Features**:
+
 - Task-specific prompts (`<MORE_DETAILED_CAPTION>`, `<DETAILED_CAPTION>`)
 - Batch image processing
 - Multiple generation strategies
 - Real-time streaming responses
 
 **API Endpoints**:
+
 - `POST /caption`: Basic captioning
 - `POST /detailed_caption`: Detailed caption generation
 - `POST /batch_caption`: Batch image processing
 - `GET /tasks`: Available Florence-2 tasks
 
 ### `gallery.py`
+
 **Purpose**: Web interface for browsing datasets and generated captions
 
 ```bash
@@ -90,6 +97,7 @@ uv run python scripts/servers/gallery.py \
 ```
 
 **Gallery Features**:
+
 - Browse images with generated captions
 - Compare multiple caption sources
 - Search and filter functionality
@@ -99,6 +107,7 @@ uv run python scripts/servers/gallery.py \
 ## Deployment Configurations
 
 ### Development Setup
+
 ```bash
 # Single-worker development server
 uv run python scripts/servers/server.py \
@@ -109,6 +118,7 @@ uv run python scripts/servers/server.py \
 ```
 
 ### Production Setup
+
 ```bash
 # Multi-worker production server
 uv run python scripts/servers/server.py \
@@ -120,6 +130,7 @@ uv run python scripts/servers/server.py \
 ```
 
 ### Docker Deployment
+
 ```dockerfile
 # Dockerfile example
 FROM python:3.11-slim
@@ -141,9 +152,11 @@ docker run -p 8000:8000 -v ./checkpoints:/app/model caption-server
 ### Caption Generation API
 
 #### POST /caption
+
 Generate caption for a single image.
 
 **Request**:
+
 ```bash
 curl -X POST \
   -F "image=@photo.jpg" \
@@ -153,22 +166,25 @@ curl -X POST \
 ```
 
 **Response**:
+
 ```json
 {
-    "caption": "A sunset over mountain peaks with orange sky",
-    "confidence": 0.89,
-    "processing_time": 0.45,
-    "model_info": {
-        "model_type": "florence-2",
-        "version": "1.0.0"
-    }
+  "caption": "A sunset over mountain peaks with orange sky",
+  "confidence": 0.89,
+  "processing_time": 0.45,
+  "model_info": {
+    "model_type": "florence-2",
+    "version": "1.0.0"
+  }
 }
 ```
 
 #### POST /batch_caption
+
 Process multiple images in a single request.
 
 **Request**:
+
 ```bash
 curl -X POST \
   -F "images=@image1.jpg" \
@@ -178,46 +194,50 @@ curl -X POST \
 ```
 
 **Response**:
+
 ```json
 {
-    "results": [
-        {
-            "filename": "image1.jpg",
-            "caption": "A red car on a street",
-            "confidence": 0.85
-        },
-        {
-            "filename": "image2.jpg", 
-            "caption": "A mountain landscape",
-            "confidence": 0.92
-        }
-    ],
-    "total_processing_time": 0.8
+  "results": [
+    {
+      "filename": "image1.jpg",
+      "caption": "A red car on a street",
+      "confidence": 0.85
+    },
+    {
+      "filename": "image2.jpg",
+      "caption": "A mountain landscape",
+      "confidence": 0.92
+    }
+  ],
+  "total_processing_time": 0.8
 }
 ```
 
 ### Health Check API
 
 #### GET /health
+
 Check server status and model availability.
 
 **Response**:
+
 ```json
 {
-    "status": "healthy",
-    "model_loaded": true,
-    "gpu_available": true,
-    "memory_usage": {
-        "gpu_memory_used": "2.1GB",
-        "gpu_memory_total": "24GB"
-    },
-    "uptime": "2h 45m"
+  "status": "healthy",
+  "model_loaded": true,
+  "gpu_available": true,
+  "memory_usage": {
+    "gpu_memory_used": "2.1GB",
+    "gpu_memory_total": "24GB"
+  },
+  "uptime": "2h 45m"
 }
 ```
 
 ## Configuration Options
 
 ### Server Configuration
+
 ```bash
 --host 0.0.0.0          # Bind address (default: localhost)
 --port 8000             # Port number (default: 8000)
@@ -227,6 +247,7 @@ Check server status and model availability.
 ```
 
 ### Model Configuration
+
 ```bash
 --model_path ./model    # Path to trained model (required)
 --batch_size 8          # Inference batch size (default: 1)
@@ -235,6 +256,7 @@ Check server status and model availability.
 ```
 
 ### Generation Parameters
+
 ```bash
 --max_length 256        # Maximum caption length (default: 256)
 --temperature 0.8       # Sampling temperature (default: 1.0)
@@ -245,12 +267,14 @@ Check server status and model availability.
 ## Security Considerations
 
 ### Input Validation
+
 - Image format validation
 - File size limits
 - Request rate limiting
 - Input sanitization
 
 ### Authentication (Production)
+
 ```bash
 # Add API key authentication
 --api_key your_secret_key
@@ -260,6 +284,7 @@ export API_KEY="your_secret_key"
 ```
 
 **Authenticated Request**:
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer your_secret_key" \
@@ -268,6 +293,7 @@ curl -X POST \
 ```
 
 ### HTTPS Setup
+
 ```bash
 # With SSL certificates
 uv run python scripts/servers/server.py \
@@ -281,6 +307,7 @@ uv run python scripts/servers/server.py \
 ## Monitoring and Logging
 
 ### Structured Logging
+
 ```bash
 # Enable detailed logging
 uv run python scripts/servers/server.py \
@@ -293,6 +320,7 @@ uv run python scripts/servers/server.py \
 ```
 
 ### Metrics Collection
+
 ```bash
 # Enable Prometheus metrics endpoint
 --enable_metrics
@@ -302,6 +330,7 @@ curl http://localhost:8000/metrics
 ```
 
 ### Health Monitoring
+
 ```bash
 # Health check for load balancers
 curl http://localhost:8000/health
@@ -313,6 +342,7 @@ curl http://localhost:8000/system_info
 ## Performance Optimization
 
 ### GPU Utilization
+
 ```bash
 # Optimize for GPU throughput
 --batch_size 16         # Larger batches for better GPU utilization
@@ -321,6 +351,7 @@ curl http://localhost:8000/system_info
 ```
 
 ### Memory Management
+
 ```bash
 # For limited GPU memory
 --batch_size 1
@@ -329,6 +360,7 @@ curl http://localhost:8000/system_info
 ```
 
 ### Load Balancing
+
 ```bash
 # Multiple server instances
 uv run python scripts/servers/server.py --port 8001 --model_path ./model &
@@ -340,6 +372,7 @@ uv run python scripts/servers/server.py --port 8002 --model_path ./model &
 ## Client Integration Examples
 
 ### Python Client
+
 ```python
 import requests
 
@@ -357,22 +390,24 @@ print(caption_data["caption"])
 ```
 
 ### JavaScript Client
+
 ```javascript
 async function generateCaption(imageFile) {
-    const formData = new FormData();
-    formData.append('image', imageFile);
-    formData.append('max_length', '256');
-    
-    const response = await fetch('http://localhost:8000/caption', {
-        method: 'POST',
-        body: formData
-    });
-    
-    return await response.json();
+  const formData = new FormData();
+  formData.append("image", imageFile);
+  formData.append("max_length", "256");
+
+  const response = await fetch("http://localhost:8000/caption", {
+    method: "POST",
+    body: formData,
+  });
+
+  return await response.json();
 }
 ```
 
 ### cURL Examples
+
 ```bash
 # Basic caption generation
 curl -X POST -F "image=@photo.jpg" http://localhost:8000/caption
@@ -398,26 +433,31 @@ curl -X POST \
 ### Common Issues
 
 **Server Won't Start**:
+
 - Check port availability: `netstat -ln | grep :8000`
 - Verify model path exists and is accessible
 - Check GPU memory availability
 
 **Slow Response Times**:
+
 - Increase `--batch_size` for better throughput
 - Use `--precision fp16` for faster inference
 - Check GPU utilization with `nvidia-smi`
 
 **Out of Memory Errors**:
+
 - Reduce `--batch_size`
 - Use `--precision fp16`
 - Restart server to clear GPU memory
 
 **Connection Refused**:
+
 - Check firewall settings
 - Verify host/port configuration
 - Ensure server is running: `ps aux | grep server.py`
 
 ### Debug Mode
+
 ```bash
 # Enable debug logging
 uv run python scripts/servers/server.py \
@@ -427,6 +467,7 @@ uv run python scripts/servers/server.py \
 ```
 
 ### Performance Profiling
+
 ```bash
 # Enable profiling
 uv run python scripts/servers/server.py \
@@ -436,6 +477,7 @@ uv run python scripts/servers/server.py \
 ```
 
 ## Getting Help
+
 ```bash
 uv run python scripts/servers/server.py --help
 uv run python scripts/servers/florence-2-server.py --help

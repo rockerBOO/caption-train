@@ -1,149 +1,128 @@
-import argparse
-import glob
+#!/usr/bin/env python3
+"""
+Refactored inference script using the new library utilities.
 
-from PIL import Image
-from transformers import (
-    AutoProcessor,
-    AutoModelForVision2Seq,
-)
-from peft import PeftModel
-from pathlib import Path
-import csv
-from accelerate import Accelerator
-from accelerate.utils import set_seed
+This script demonstrates how to use the refactored caption_train library
+for clean, maintainable inference.
+"""
+
 import torch
-# from itertools import batched
+from pathlib import Path
+from PIL import Image
+from accelerate import Accelerator
+from transformers import AutoProcessor
+from peft import PeftModel
+
+from caption_train.inference.sampling import sample_with_prompts, evaluate_sample_batch
+from caption_train.utils.arguments import create_inference_parser
 
 
-@torch.inference_mode()
-def main(args):
-    if args.seed:
-        print(f"Using seed {args.seed}")
-        set_seed(args.seed)
+def load_model_and_processor(model_path: Path, base_model_id: str = "microsoft/Florence-2-base-ft"):
+    """Load trained model and processor."""
+    print(f"Loading model from {model_path}")
 
-    processor = AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-    model = AutoModelForVision2Seq.from_pretrained(args.base_model)
+    # Load base model and processor
+    processor = AutoProcessor.from_pretrained(base_model_id, trust_remote_code=True)
 
+    # Load PEFT model
+    model = PeftModel.from_pretrained(base_model_id, model_path, trust_remote_code=True, torch_dtype=torch.bfloat16)
+
+    return model, processor
+
+
+def load_images(input_path: Path) -> list[Image.Image]:
+    """Load images from path (file or directory)."""
+    if input_path.is_file():
+        # Single image
+        return [Image.open(input_path)]
+    elif input_path.is_dir():
+        # Directory of images
+        images = []
+        for ext in ["*.jpg", "*.jpeg", "*.png", "*.webp"]:
+            images.extend(input_path.glob(ext))
+        return [Image.open(img_path) for img_path in sorted(images)]
+    else:
+        raise ValueError(f"Input path not found: {input_path}")
+
+
+def batch_images(images: list[Image.Image], batch_size: int) -> list[list[Image.Image]]:
+    """Split images into batches."""
+    return [images[i : i + batch_size] for i in range(0, len(images), batch_size)]
+
+
+def save_captions(captions: list[str], output_path: Path) -> None:
+    """Save generated captions to file."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "w") as f:
+        for i, caption in enumerate(captions):
+            f.write(f"Image {i + 1}: {caption}\n")
+
+    print(f"Captions saved to {output_path}")
+
+
+def main():
+    """Main inference function."""
+    parser = create_inference_parser()
+    args = parser.parse_args()
+
+    # Validate arguments
+    if not args.model_path.exists():
+        raise ValueError(f"Model path not found: {args.model_path}")
+    if not args.input_path.exists():
+        raise ValueError(f"Input path not found: {args.input_path}")
+
+    # Set up accelerator
     accelerator = Accelerator()
-    device = accelerator.device
 
-    if args.peft_model:
-        model = PeftModel.from_pretrained(model, args.peft_model)
-
-    model, processor = accelerator.prepare(model, processor)
-
+    # Load model and processor
+    model, processor = load_model_and_processor(args.model_path)
+    model = accelerator.prepare(model)
     model.eval()
 
-    images_path = Path(args.images)
+    print(f"Model loaded successfully on device: {accelerator.device}")
 
-    if images_path.is_dir():
-        images = sum(
-            [glob.glob(str(images_path.absolute()) + f"/*.{f}") for f in ["jpg", "jpeg", "png", "webp", "avif", "bmp"]],
-            [],
+    # Load images
+    images = load_images(args.input_path)
+    print(f"Loaded {len(images)} images")
+
+    # Process images in batches
+    all_captions = []
+    image_batches = batch_images(images, args.batch_size)
+
+    print("Generating captions...")
+    for batch_idx, image_batch in enumerate(image_batches):
+        print(f"Processing batch {batch_idx + 1}/{len(image_batches)}")
+
+        # Convert images to tensors (this would normally be done by processor)
+        # For simplicity, we'll use the sampling utility directly
+        captions = sample_with_prompts(
+            model=model,
+            processor=processor,
+            accelerator=accelerator,
+            images=image_batch,
+            prompts=None,  # No specific prompts
+            max_length=args.max_length,
+            num_beams=args.num_beams,
+            do_sample=args.do_sample,
+            temperature=args.temperature,
+            top_p=args.top_p,
         )
 
-        print(f"{len(images)} images")
-    else:
-        images = [images_path]
-        print(f"{len(images)} images")
+        all_captions.extend(captions)
 
-    results = []
-    images.sort()
-    # for idx, img in enumerate(batched(images, 2)):
-    batch_size = 16
-    for i in range(0, len(images), batch_size):
-        batch = [Image.open(img) for img in images[i : i + batch_size]]
-        inputs = processor(images=batch, return_tensors="pt").to(accelerator.device)
-        with accelerator.autocast():
-            generated_ids = model.generate(
-                pixel_values=inputs.pixel_values,
-                min_length=3,
-                num_beams=3,
-                max_length=args.max_token_length,
-            )
+        # Print some examples
+        for i, caption in enumerate(captions):
+            print(f"  Image {batch_idx * args.batch_size + i + 1}: {caption}")
 
-            generated_captions = processor.batch_decode(generated_ids, skip_special_tokens=True)
+    print(f"\nGenerated {len(all_captions)} captions")
 
-        for idx, img in enumerate(images[i : i + batch_size]):
-            results.append({"img": img, "caption": generated_captions[idx]})
-            img = Path(img)
-            print("gen", img.stem, generated_captions[idx])
+    # Save captions if output path specified
+    if args.output_path:
+        save_captions(all_captions, args.output_path)
 
-    if args.save_captions:
-        # Save a CSV of the results
-        with open("results.csv", "w", newline="") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["idx", "img", "caption"])
-            writer.writeheader()
-            for r in results:
-                writer.writerow(r)
-
-        # Save captions next to images with a .txt file
-        for result in results:
-            img = Path(result["img"])
-
-            caption_file = img.with_name(img.stem + args.caption_extension)
-
-            if caption_file.is_file():
-                print(f"Caption already exists for {str(caption_file)}")
-                if args.overwrite is False:
-                    print(result["caption"])
-                    continue
-
-            with open(caption_file, "w", encoding="utf-8") as f:
-                f.write(result["caption"])
+    print("Inference completed successfully!")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--base_model",
-        type=str,
-        default="Salesforce/blip-image-captioning-base",
-        help="Model to load from hugging face 'Salesforce/blip-image-captioning-base'",
-    )
-
-    parser.add_argument(
-        "--peft_model",
-        type=str,
-        help="PEFT (LoRA, IA3, ...) model directory for the base model",
-    )
-
-    parser.add_argument(
-        "--images",
-        type=str,
-        required=True,
-        help="Directory of images or image file to caption",
-    )
-
-    parser.add_argument(
-        "--beams",
-        default=3,
-        help="Save captions to the images next to the image",
-    )
-
-    parser.add_argument("--seed", type=int, help="Seed")
-
-    parser.add_argument(
-        "--save_captions",
-        action="store_true",
-        help="Save captions to the images next to the image",
-    )
-
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite captions")
-
-    parser.add_argument(
-        "--caption_extension",
-        default=".txt",
-        help="Extension to save the captions as",
-    )
-
-    parser.add_argument(
-        "--max_token_length",
-        type=int,
-        default=75,
-        help="Maximum number of tokens to generate",
-    )
-
-    args = parser.parse_args()
-    main(args)
+    main()
