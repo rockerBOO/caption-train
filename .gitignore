@@ -11,7 +11,7 @@ config.toml
 results.csv
 
 # Where the default training results location is
-training/
+/training/
 
 # Wandb logging directory
 wandb/
