@@ -1,3 +1,6 @@
+import asyncio
+from websockets import serve
+
 
 def send_and_wait_for_response(websocket, message):
     req = dict(
@@ -9,6 +12,7 @@ def send_and_wait_for_response(websocket, message):
     recv_message = websocket.recv()
     print(f"Received: {recv_message}")
     return recv_message
+
 
 async def websocket_process(message, websocket):
     print(message)
