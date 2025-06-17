@@ -1,4 +1,5 @@
 name: Test
+permissions: read-all
 
 on:
   push:
@@ -16,7 +17,7 @@ on:
 
 jobs:
   test:
-    name: python
+    name: Python Tests and Linting
     runs-on: ubuntu-latest
 
     steps:
@@ -35,6 +36,11 @@ jobs:
 
       - name: Install the project
         run: uv sync --frozen --extra llm --extra cpu --dev
+
+      - name: Run ruff linting
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
 
       - name: Run tests
         run: uv run pytest
