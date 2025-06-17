@@ -36,7 +36,10 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install the project
-        run: uv sync --frozen --extra llm --extra cpu --extra server --dev
+        run: |
+          uv pip index add --index-url https://download.pytorch.org/whl/cpu pytorch-cpu
+          uv pip install torch torchvision --index pytorch-cpu
+          uv sync --frozen --extra llm --extra cpu --extra server --dev
 
       - name: Run ruff linting
         run: |
