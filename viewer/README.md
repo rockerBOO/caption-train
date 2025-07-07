@@ -6,7 +6,6 @@ A viewer of captions and the images in the browser.
 
 Script run.py
 
-
 ```python
 from server import run, SubHTTPServer, ServerHandler
 run("~/art/images", SubHTTPServer, ServerHandler)

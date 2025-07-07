@@ -28,11 +28,12 @@ dependencies = [
   "setuptools>=78.1.0",
   "sentence-transformers>=4.1.0",
   "scikit-learn>=1.6.1",
+  "bitsandbytes>=0.45.4",
 ]
 
 [project.optional-dependencies]
 decord = [
-    "decord",
+  "decord",
 ]
 server = [
   "flask",
@@ -128,8 +129,8 @@ explicit = true
 [tool.ruff]
 line-length = 120
 exclude = [
-    "florence/",
-    "moondream/"
+  "florence/",
+  "moondream/",
 ]
 
 [tool.ruff.lint]
@@ -150,14 +151,6 @@ pythonpath = [
 ]
 minversion = "6.0"
 
-[tool.setuptools.packages.find]
-where = [
-    "src"
-]
-
-[tool.setuptools.package-dir]
-"" = "src"
-
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

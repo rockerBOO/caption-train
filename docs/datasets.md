@@ -1,43 +1,61 @@
-# Datasets
+# Dataset Preparation
 
-We need to make sure your images have a compatible dataset. We have a script to convert over image/text captioned file pairs.
+## Supported Dataset Formats
 
-Convert:
-
-- images/img1.jpg
-- images/img1.txt
-
-To a `metadata.jsonl` using `compile_captions.py` which is compatible with 🤗Datasets.
-
-- Find the appropriate model you want to train a LoRA on, BLIP, Florence 2, Moondream 2.
-- Then we can train on that dataset.
-- Also have inference scripts for each model.
-
-### Setup dataset from text/image pairs
+### Image/Text Pairs
 
 ```
-$ uv run python compile_captions.py --help
-usage: compile_captions.py [-h] dataset_dir output_dir
-
-        Create hugging face dataset compatible caption file
-
-        Take Kohya-ss or image/text file pairs and compile it
-        into a compatible file
-
-        $ python compile_captions.py /path/to/captions/dir
-
-        # Output metadata.jsonl to a different location
-        $ python compile_captions.py /path/to/captions/dir /path/to/output_dir
-
-
-positional arguments:
-  dataset_dir
-  output_dir
-
-options:
-  -h, --help   show this help message and exit
+dataset/
+├── image1.jpg
+├── image1.txt
+├── image2.png
+└── image2.txt
 ```
+
+### JSONL Format
+
+```jsonl
+{"file_name": "image1.jpg", "text": "A red car on a street"}
+{"file_name": "image2.png", "text": "A mountain landscape"}
+```
+
+## Preparing Your Dataset
+
+Use `compile_captions.py` to convert datasets into a Hugging Face compatible format:
+
+### Usage
 
 ```bash
-$ python compile_captions.py /path/to/captions/dir /path/to/output_dir
+# Basic conversion
+uv run python scripts/utils/compile_captions.py /path/to/images output_dir
+
+# Specify input and output directories
+uv run python scripts/utils/compile_captions.py /path/to/images /path/to/output
 ```
+
+### Key Features
+
+- Converts Kohya-ss or image/text file pairs
+- Generates `metadata.jsonl` compatible with Hugging Face Datasets
+- Supports flexible input and output directory configuration
+
+## Supported Sources
+
+- Local image/text pairs
+- Hugging Face datasets
+- Kohya-ss style datasets
+
+### Using Remote Datasets
+
+```bash
+# Train using a remote Hugging Face dataset
+uv run python scripts/training/train_florence_peft.py \
+    --dataset "ybelkada/football-dataset"
+```
+
+## Best Practices
+
+- Ensure consistent file naming
+- Use clear, descriptive captions
+- Balance dataset size and diversity
+- Preprocess images to consistent size/format

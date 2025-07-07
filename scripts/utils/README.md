@@ -5,6 +5,7 @@ This directory contains utility scripts for dataset processing, evaluation, and 
 ## Dataset Processing
 
 ### `compile_captions.py`
+
 **Purpose**: Convert individual caption files to metadata.jsonl format
 
 ```bash
@@ -21,6 +22,7 @@ uv run python scripts/utils/compile_captions.py \
 ```
 
 **Input Format**:
+
 ```
 dataset/
 ├── image1.jpg
@@ -33,6 +35,7 @@ dataset/
 ```
 
 **Output Format**:
+
 ```jsonl
 {"file_name": "image1.jpg", "text": "A red car on a street"}
 {"file_name": "image2.png", "text": "A mountain landscape"}
@@ -42,6 +45,7 @@ dataset/
 ## Model Evaluation
 
 ### `semantic-similarity.py`
+
 **Purpose**: Evaluate caption quality using semantic similarity metrics
 
 ```bash
@@ -60,6 +64,7 @@ uv run python scripts/utils/semantic-similarity.py \
 ```
 
 **Input Format**:
+
 ```jsonl
 # predictions.jsonl
 {"file_name": "image1.jpg", "caption": "A red sports car"}
@@ -71,12 +76,14 @@ uv run python scripts/utils/semantic-similarity.py \
 ```
 
 **Output Metrics**:
+
 - Mean semantic similarity score
 - Per-image similarity scores
 - Distribution statistics
 - High/low similarity examples
 
 ### `clip-score-improvement.py`
+
 **Purpose**: Measure CLIP score improvements after training
 
 ```bash
@@ -97,6 +104,7 @@ uv run python scripts/utils/clip-score-improvement.py \
 ```
 
 **Metrics Computed**:
+
 - CLIP similarity scores for original vs improved captions
 - Score improvement distribution
 - Statistical significance tests
@@ -105,6 +113,7 @@ uv run python scripts/utils/clip-score-improvement.py \
 ## Image Analysis
 
 ### `swinv2.py`
+
 **Purpose**: Extract image features using SwinV2 vision transformer
 
 ```bash
@@ -122,6 +131,7 @@ uv run python scripts/utils/swinv2.py \
 ```
 
 **Use Cases**:
+
 - Dataset diversity analysis
 - Image clustering and deduplication
 - Visual similarity search
@@ -130,6 +140,7 @@ uv run python scripts/utils/swinv2.py \
 ## Common Workflows
 
 ### Dataset Preparation Pipeline
+
 ```bash
 # 1. Compile individual caption files
 uv run python scripts/utils/compile_captions.py \
@@ -150,6 +161,7 @@ uv run python scripts/inference/inference_refactored.py \
 ```
 
 ### Model Evaluation Pipeline
+
 ```bash
 # 1. Generate captions with trained model
 uv run python scripts/inference/inference_refactored.py \
@@ -176,20 +188,24 @@ uv run python scripts/utils/clip-score-improvement.py \
 ### Common Arguments
 
 **Input/Output**:
+
 - `--input_dir`, `--dataset_dir`: Input directory paths
 - `--output_file`, `--output_dir`: Output file or directory
 - `--image_extensions`: Supported image formats (default: .jpg, .png, .webp)
 
 **Processing**:
+
 - `--batch_size`: Batch size for processing (default: 32)
 - `--num_workers`: Number of parallel workers (default: 4)
 - `--device`: Device to use (cuda/cpu, auto-detected by default)
 
 **Models**:
+
 - `--model_name`: HuggingFace model identifier
 - `--model_path`: Local model path
 
 ### Environment Variables
+
 ```bash
 export HF_TOKEN="your-huggingface-token"  # For private models
 export CUDA_VISIBLE_DEVICES="0"          # GPU selection
@@ -198,6 +214,7 @@ export CUDA_VISIBLE_DEVICES="0"          # GPU selection
 ## Performance Tips
 
 ### Large Datasets
+
 ```bash
 # Use larger batch sizes for faster processing
 --batch_size 64 --num_workers 8
@@ -207,6 +224,7 @@ find /huge/dataset -name "*.jpg" | head -10000 | xargs -I {} python script.py
 ```
 
 ### Memory Management
+
 ```bash
 # Reduce batch size if out of memory
 --batch_size 16
@@ -216,6 +234,7 @@ find /huge/dataset -name "*.jpg" | head -10000 | xargs -I {} python script.py
 ```
 
 ### Parallel Processing
+
 ```bash
 # Multiple GPU processing
 CUDA_VISIBLE_DEVICES=0 python script.py --batch_size 32 &
@@ -226,14 +245,18 @@ wait
 ## Output Formats
 
 ### JSONL (JSON Lines)
+
 Most scripts output JSONL for easy streaming and processing:
+
 ```jsonl
 {"file_name": "image1.jpg", "score": 0.85, "category": "nature"}
 {"file_name": "image2.jpg", "score": 0.92, "category": "urban"}
 ```
 
 ### JSON Reports
+
 Analysis scripts often output detailed JSON reports:
+
 ```json
 {
     "summary": {
@@ -249,6 +272,7 @@ Analysis scripts often output detailed JSON reports:
 ```
 
 ### CSV for Spreadsheet Analysis
+
 ```bash
 # Convert JSONL to CSV for Excel/Google Sheets
 python -c "
@@ -263,20 +287,24 @@ df.to_csv('results.csv', index=False)
 ### Common Issues
 
 **File Not Found Errors**:
+
 - Check file paths are absolute or relative to current directory
 - Verify input files exist and have correct permissions
 
 **Memory Issues**:
+
 - Reduce `--batch_size`
 - Use `--device cpu` for large models
 - Process datasets in smaller chunks
 
 **Slow Processing**:
+
 - Increase `--batch_size` (if memory allows)
 - Use more `--num_workers`
 - Ensure GPU is being utilized
 
 ### Getting Help
+
 ```bash
 # Each script provides detailed help
 uv run python scripts/utils/compile_captions.py --help

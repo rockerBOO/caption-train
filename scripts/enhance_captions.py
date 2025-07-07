@@ -17,13 +17,13 @@ from transformers import (
     Qwen2_5_VLProcessor,
 )
 
-from src.caption_train.datasets import datasets_config_args, find_images
-from src.caption_train.llm import get_combined_caption
-from src.caption_train.opt import get_accelerator
-from src.caption_train.ratelimit import RateLimitContext, RateLimiter
-from src.caption_train.trainer import FileConfig
-from src.caption_train.util import get_group_args
-from src.caption_train.vlm import janus_generate_caption, qwen_vl_generate_caption
+from caption_train.datasets import datasets_config_args, find_images
+from caption_train.llm import get_combined_caption
+from caption_train.opt import get_accelerator
+from caption_train.ratelimit import RateLimitContext, RateLimiter
+from caption_train.trainer import FileConfig
+from caption_train.util import get_group_args
+from caption_train.vlm import janus_generate_caption, qwen_vl_generate_caption
 
 Model = Qwen2_5_VLForConditionalGeneration | MultiModalityCausalLM
 Processor = VLChatProcessor | Qwen2_5_VLProcessor

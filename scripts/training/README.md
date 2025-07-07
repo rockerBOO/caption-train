@@ -5,7 +5,9 @@ This directory contains scripts for training vision-language models using LoRA (
 ## 🚀 Available Training Scripts
 
 ### `train_florence.py`
+
 **Best for**: Florence-2 model fine-tuning
+
 ```bash
 uv run python scripts/training/train_florence.py \
     --model_id microsoft/Florence-2-base-ft \
@@ -20,7 +22,9 @@ uv run python scripts/training/train_florence.py \
 ```
 
 ### `train_git.py`
+
 **Best for**: GIT model fine-tuning
+
 ```bash
 uv run python scripts/training/train_git.py \
     --model_id microsoft/git-base \
@@ -32,7 +36,9 @@ uv run python scripts/training/train_git.py \
 ```
 
 ### `train_blip.py`
+
 **Best for**: BLIP model fine-tuning
+
 ```bash
 uv run python scripts/training/train_blip.py \
     --model_id Salesforce/blip-image-captioning-base \
@@ -43,7 +49,9 @@ uv run python scripts/training/train_blip.py \
 ```
 
 ### `train3.py`
+
 **Best for**: Multi-model training with auto-detection
+
 ```bash
 # Auto-detects model type from model name
 uv run python scripts/training/train3.py \
@@ -55,7 +63,9 @@ uv run python scripts/training/train3.py \
 ```
 
 ### `fine_tune_blip_using_peft.py`
+
 **Best for**: Advanced BLIP fine-tuning with custom PEFT configurations
+
 ```bash
 uv run python scripts/training/fine_tune_blip_using_peft.py \
     --model_id Salesforce/blip-image-captioning-large \
@@ -68,7 +78,9 @@ uv run python scripts/training/fine_tune_blip_using_peft.py \
 ## Configuration Options
 
 ### Command Line Arguments
+
 All scripts support comprehensive argument configuration:
+
 - **Model**: `--model_id`, `--model_name_or_path`
 - **Dataset**: `--dataset`, `--dataset_dir` (directory with image/caption pairs)
 - **Training**: `--epochs`, `--batch_size`, `--learning_rate`, `--gradient_accumulation_steps`
@@ -77,7 +89,9 @@ All scripts support comprehensive argument configuration:
 - **Logging**: `--log_with wandb`, `--name experiment_name`
 
 ### TOML Configuration Files
+
 Create reusable configurations:
+
 ```toml
 # config.toml
 [model]
@@ -107,6 +121,7 @@ num_workers = 4
 Use with: `--config config.toml`
 
 ### Environment Variables
+
 ```bash
 export WANDB_API_KEY="your-wandb-key"
 export HF_TOKEN="your-huggingface-token"
@@ -115,6 +130,7 @@ export HF_TOKEN="your-huggingface-token"
 ## Dataset Formats
 
 ### Directory-based Dataset
+
 ```
 dataset/
 ├── image1.jpg
@@ -127,12 +143,14 @@ dataset/
 ```
 
 ### JSONL Dataset
+
 ```jsonl
 {"file_name": "image1.jpg", "text": "A red car on a street"}
 {"file_name": "image2.png", "text": "A mountain landscape"}
 ```
 
 ### HuggingFace Dataset
+
 ```bash
 --dataset "ybelkada/football-dataset"  # HF dataset name
 ```
@@ -140,24 +158,30 @@ dataset/
 ## Advanced Features
 
 ### LoRA+ Training
+
 Enhanced LoRA with differential learning rates:
+
 ```bash
 --lora_plus_ratio 16  # B matrices get 16x learning rate
 ```
 
 ### Gradient Compression
+
 Memory-efficient training with Flora:
+
 ```bash
 --accumulation_rank 8  # Low-rank gradient compression
 ```
 
 ### Mixed Precision & Quantization
+
 ```bash
 --quantize              # 4-bit model quantization
 --gradient_checkpointing # Reduce memory usage
 ```
 
 ### Caption Augmentation
+
 ```bash
 --shuffle_captions      # Randomly shuffle caption parts
 --caption_dropout 0.1   # Randomly drop 10% of caption parts
@@ -167,16 +191,19 @@ Memory-efficient training with Flora:
 ## Model-Specific Notes
 
 ### Florence-2
+
 - **Best prompts**: `"<MORE_DETAILED_CAPTION>"`, `"<DETAILED_CAPTION>"`
 - **Target modules**: `["qkv", "proj", "fc1", "fc2"]` (auto-configured)
 - **Typical LR**: `1e-4` to `1e-5`
 
 ### GIT
+
 - **Image augmentation**: `--augment_images` recommended
 - **Sequence length**: `--block_size 2048` (default) or `1024` for memory constraints
 - **Quantization**: `--lora_bits 4` for memory efficiency
 
 ### BLIP
+
 - **Weight decay**: `1e-4` recommended for stability
 - **Conservative LR**: `2e-5` to `5e-5` (lower than other models)
 - **Batch size**: Start with 2-4, BLIP models are memory-intensive
@@ -184,8 +211,9 @@ Memory-efficient training with Flora:
 ## Script Features
 
 All training scripts include:
+
 - **LoRA/PEFT Support**: Memory-efficient fine-tuning
-- **Mixed Precision**: Automatic FP16/BF16 optimization  
+- **Mixed Precision**: Automatic FP16/BF16 optimization
 - **Gradient Checkpointing**: Reduce memory usage
 - **Wandb Integration**: Experiment tracking and logging
 - **TOML Configuration**: Reusable configuration files
@@ -196,21 +224,25 @@ All training scripts include:
 ### Common Issues
 
 **Out of Memory**:
+
 ```bash
 --batch_size 1 --gradient_accumulation_steps 4 --quantize --gradient_checkpointing
 ```
 
 **Slow Training**:
+
 ```bash
 --num_workers 4 --accumulation_rank 8  # Parallel data loading + compression
 ```
 
 **Poor Convergence**:
+
 ```bash
 --learning_rate 5e-5 --scheduler linear --lora_plus_ratio 16
 ```
 
 ### Getting Help
+
 ```bash
 uv run python scripts/training/train_florence_refactored.py --help
 ```

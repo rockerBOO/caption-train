@@ -1,7 +1,7 @@
 import json
 import argparse
 from pathlib import Path
-from src.caption_train.captions import load_captions
+from caption_train.captions import load_captions
 
 from datasets import load_dataset
 

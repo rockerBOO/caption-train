@@ -179,3 +179,5 @@ cython_debug/
 
 # Image files
 *.png
+
+docs/2025*
